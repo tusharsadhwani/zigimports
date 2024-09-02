@@ -61,9 +61,9 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8) !std.ArrayList
 
             const semicolon = last_token + 1;
             var end_location = tree.tokenLocation(0, semicolon);
-            // If the semicolon is followed by a newline, delete that too
+            // If the semicolon is followed by a newlines, delete those too
             var end_index = tree.tokenToSpan(semicolon).end;
-            if (source.len > end_index and source[end_index] == '\n') {
+            while (source.len > end_index and source[end_index] == '\n') {
                 end_index += 1;
                 end_location.line += 1;
                 end_location.column = 0;
