@@ -74,8 +74,29 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8) !std.ArrayList
     return unused_imports;
 }
 
-pub fn remove_imports(source: [:0]u8, imports: []ImportSpan) []u8 {
-    // TODO: --fix currently does nothing
-    _ = imports;
-    return source[0..source.len];
+// Returns `true` when lhs shows up before rhs in the file, i.e. the start index of
+// lhs < start index of rhs. Also has checks to ensure the spans never overlap.
+fn compare_start(_: void, lhs: ImportSpan, rhs: ImportSpan) bool {
+    if (lhs.start_index < rhs.start_index) {
+        std.debug.assert(lhs.end_index <= rhs.start_index);
+        return true;
+    }
+
+    std.debug.assert(rhs.end_index <= lhs.start_index);
+    return false;
+}
+
+pub fn remove_imports(al: std.mem.Allocator, source: [:0]u8, imports: []ImportSpan) !std.ArrayList([]u8) {
+    std.debug.assert(imports.len > 0);
+    std.mem.sort(ImportSpan, imports, {}, compare_start);
+
+    var new_spans = std.ArrayList([]u8).init(al);
+    var previous_import = imports[0];
+    try new_spans.append(source[0..previous_import.start_index]);
+    for (imports[1..]) |import| {
+        try new_spans.append(source[previous_import.end_index + 1 .. import.start_index]);
+        previous_import = import;
+    }
+    try new_spans.append(source[previous_import.end_index..]);
+    return new_spans;
 }

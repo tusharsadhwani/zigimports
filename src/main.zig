@@ -20,6 +20,17 @@ fn read_file(al: std.mem.Allocator, filepath: []const u8) ![:0]u8 {
     return source;
 }
 
+fn write_file(filepath: []const u8, chunks: [][]u8) !void {
+    const file = try std.fs.cwd().createFile(filepath, .{});
+    defer file.close();
+    const stat = try file.stat();
+    if (stat.kind == .directory) {
+        return error.IsDir;
+    }
+
+    for (chunks) |chunk| try file.writeAll(chunk);
+}
+
 fn run(al: std.mem.Allocator, filepath: []const u8, fix_mode: bool) !void {
     const source = try read_file(al, filepath);
     defer al.free(source);
@@ -30,14 +41,15 @@ fn run(al: std.mem.Allocator, filepath: []const u8, fix_mode: bool) !void {
     if (fix_mode) {
         const fix_count = unused_imports.items.len;
         if (fix_count > 0) {
-            const fixed_source = zigimports.remove_imports(source, unused_imports.items);
+            const cleaned_sources = try zigimports.remove_imports(al, source, unused_imports.items);
+            defer cleaned_sources.deinit();
+            try write_file(filepath, cleaned_sources.items);
+
             std.debug.print("{s} - Removed {} unused import{s}\n", .{
                 filepath,
                 fix_count,
                 if (fix_count == 1) "" else "s",
             });
-            // TODO: do it
-            _ = fixed_source;
         }
     } else {
         for (unused_imports.items) |import| {
