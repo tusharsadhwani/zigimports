@@ -101,7 +101,7 @@ pub fn remove_imports(al: std.mem.Allocator, source: [:0]u8, imports: []ImportSp
     var previous_import = imports[0];
     try new_spans.append(source[0..previous_import.start_index]);
     for (imports[1..]) |import| {
-        try new_spans.append(source[previous_import.end_index + 1 .. import.start_index]);
+        try new_spans.append(source[previous_import.end_index..import.start_index]);
         previous_import = import;
     }
     try new_spans.append(source[previous_import.end_index..]);
