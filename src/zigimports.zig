@@ -18,28 +18,27 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8) !std.ArrayList
     var import_used = std.StringHashMap(bool).init(al);
     defer import_index.deinit();
     defer import_used.deinit();
+    // Pass 1: we may have global definitions after they get used inside functions
     for (tree.nodes.items(.tag), 0..) |node_type, index| {
         if (node_type == .simple_var_decl) {
-            // I'll be optimistically calling the variables what I hope to find in the
-            // LHS / RHS, and then validating and skipping if it's not what is expected.
             const import_stmt = tree.simpleVarDecl(@intCast(index));
-
-            const import_call = import_stmt.ast.init_node;
-            const import_token = tree.firstToken(import_call);
-            if (!std.mem.eql(u8, tree.tokenSlice(import_token), "@import")) continue;
-
+            // Don't try to delete `pub` statements
+            if (import_stmt.visib_token != null) continue;
             const import_name_idx = import_stmt.ast.mut_token + 1;
             const import_name = tree.tokenSlice(import_name_idx);
             try import_index.put(import_name, @intCast(index));
             try import_used.put(import_name, false);
-        } else if (node_type == .field_access or node_type == .identifier) {
+        }
+    }
+    // Pass 2: Check if we use the variable anywhere in the file
+    for (tree.nodes.items(.tag), 0..) |node_type, index| {
+        if (node_type == .field_access or node_type == .identifier) {
             const identifier_idx = tree.firstToken(@intCast(index));
             const identifier = tree.tokenSlice(identifier_idx);
             if (import_used.getKey(identifier) != null) {
                 // Mark import as used
                 try import_used.put(identifier, true);
             }
-            continue;
         }
     }
 
