@@ -1,6 +1,6 @@
 # zigimports
 
-Automatically remove unused imports from Zig files.
+Automatically remove unused imports and global variables from Zig files.
 
 Zig currently entirely ignores unused globals, which means unused imports aren't errors.
 They aren't even warnings.
