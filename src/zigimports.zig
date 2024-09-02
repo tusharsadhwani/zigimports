@@ -56,12 +56,19 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8) !std.ArrayList
             const last_token = tree.lastToken(node_index);
 
             const semicolon = last_token + 1;
-            const end_location = tree.tokenLocation(0, semicolon);
+            var end_location = tree.tokenLocation(0, semicolon);
+            // If the semicolon is followed by a newline, delete that too
+            var end_index = tree.tokenToSpan(semicolon).end;
+            if (source.len > end_index and source[end_index] == '\n') {
+                end_index += 1;
+                end_location.line += 1;
+                end_location.column = 0;
+            }
 
             const span = ImportSpan{
                 .import_name = import_variable,
                 .start_index = tree.tokenToSpan(first_token).start,
-                .end_index = tree.tokenToSpan(semicolon).end,
+                .end_index = end_index,
                 .start_line = start_location.line + 1,
                 .start_column = start_location.column,
                 .end_line = end_location.line + 1,
