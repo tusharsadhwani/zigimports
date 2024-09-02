@@ -10,6 +10,10 @@ the Zig compiler will simply ignore it.
 
 `zigimports` helps you avoid that by cleaning up unused imports.
 
+> [!NOTE] 
+> Zig plans to eventually address this issue in the compiler directly:
+> https://github.com/ziglang/zig/issues/335
+
 ## Installation
 
 Requires Zig 0.13.0 or newer:
