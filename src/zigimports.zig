@@ -24,6 +24,11 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8) !std.ArrayList
             const import_stmt = tree.simpleVarDecl(@intCast(index));
             // Don't try to delete `pub` statements
             if (import_stmt.visib_token != null) continue;
+            // Only do imports (for now)
+            const import_call = import_stmt.ast.init_node;
+            const import_token = tree.firstToken(import_call);
+            if (!std.mem.eql(u8, tree.tokenSlice(import_token), "@import")) continue;
+
             const import_name_idx = import_stmt.ast.mut_token + 1;
             const import_name = tree.tokenSlice(import_name_idx);
             try import_index.put(import_name, @intCast(index));
