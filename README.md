@@ -26,6 +26,8 @@ You should have the `./zig-out/bin/zigimports` binary now.
 
 ## Usage
 
+Basic usage:
+
 ```console
 $ zigimports path/to/file.zig
 path/to/file.zig:1:0: std is unused
@@ -34,4 +36,10 @@ path/to/file.zig:9:0: MyStruct is unused
 
 $ zigimports path/to/file.zig --fix
 path/to/file.zig - Removed 3 unused imports
+```
+
+To tidy up your entire codebase, use:
+
+```bash
+zigimports ./src/**/*.zig --fix
 ```
