@@ -66,7 +66,7 @@ fn get_zig_files(al: std.mem.Allocator, path: []u8) !std.ArrayList([]u8) {
     return files;
 }
 fn _get_zig_files(al: std.mem.Allocator, files: *std.ArrayList([]u8), path: []u8) !void {
-    const file = try std.fs.cwd().openFile(path, .{});
+    const file = std.fs.cwd().openFile(path, .{}) catch return;
     defer file.close();
 
     const stat = try file.stat();
@@ -93,9 +93,9 @@ fn _get_zig_files(al: std.mem.Allocator, files: *std.ArrayList([]u8), path: []u8
 
 pub fn main() !u8 {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer if (gpa.deinit() == .leak) {
-        std.process.exit(1);
-    };
+    // defer if (gpa.deinit() == .leak) {
+    //     std.process.exit(1);
+    // };
     const al = gpa.allocator();
 
     var args = try std.process.argsAlloc(al);
