@@ -41,5 +41,5 @@ path/to/file.zig - Removed 3 unused imports
 To tidy up your entire codebase, use:
 
 ```bash
-zigimports ./src/**/*.zig --fix
+zigimports --fix .
 ```
