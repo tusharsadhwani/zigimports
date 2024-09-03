@@ -10,40 +10,83 @@ pub const ImportSpan = struct {
     end_column: usize,
 };
 
+pub const BlockSpan = struct {
+    start_index: usize,
+    end_index: usize,
+};
+
+/// Returns if the given source position is inside a block or not.
+/// `true` means that statement it NOT global, `false` means the statement is global.
+fn is_inside_block(blocks: []BlockSpan, source_pos: usize) bool {
+    for (blocks) |block| {
+        // TODO: maybe it should be `>` not `>=` for end_index
+        if (block.start_index <= source_pos and block.end_index >= source_pos)
+            return true;
+    }
+    return false;
+}
+
 pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8) !std.ArrayList(ImportSpan) {
     var tree = try std.zig.Ast.parse(al, source, .zig);
     defer tree.deinit(al);
 
     var import_index = std.StringHashMap(u32).init(al);
     var import_used = std.StringHashMap(bool).init(al);
+    var block_spans = std.ArrayList(BlockSpan).init(al);
     defer import_index.deinit();
     defer import_used.deinit();
-    // Pass 1: we may have global definitions after they get used inside functions
+    defer block_spans.deinit();
+    // Pass 1: Find the spans of all block scopes
     for (tree.nodes.items(.tag), 0..) |node_type, index| {
-        if (node_type == .simple_var_decl) {
-            const import_stmt = tree.simpleVarDecl(@intCast(index));
-            // Don't try to delete `pub` statements
-            if (import_stmt.visib_token != null) continue;
-            // Only do imports (for now)
-            const import_call = import_stmt.ast.init_node;
-            const import_token = tree.firstToken(import_call);
-            if (!std.mem.eql(u8, tree.tokenSlice(import_token), "@import")) continue;
-
-            const import_name_idx = import_stmt.ast.mut_token + 1;
-            const import_name = tree.tokenSlice(import_name_idx);
-            try import_index.put(import_name, @intCast(index));
-            try import_used.put(import_name, false);
+        switch (node_type) {
+            .block,
+            .block_two,
+            .block_semicolon,
+            .block_two_semicolon,
+            .container_decl,
+            .container_decl_trailing,
+            .container_decl_two,
+            .container_decl_two_trailing,
+            .container_decl_arg,
+            .container_decl_arg_trailing,
+            => {
+                const lbrace = tree.firstToken(@intCast(index));
+                const rbrace = tree.lastToken(@intCast(index));
+                try block_spans.append(.{
+                    .start_index = tree.tokenToSpan(lbrace).start,
+                    .end_index = tree.tokenToSpan(rbrace).end,
+                });
+            },
+            else => {},
         }
     }
-    // Pass 2: Check if we use the variable anywhere in the file
+
+    // Pass 2: Find all global variable declarations
     for (tree.nodes.items(.tag), 0..) |node_type, index| {
-        if (node_type == .field_access or node_type == .identifier) {
-            const identifier_idx = tree.firstToken(@intCast(index));
-            const identifier = tree.tokenSlice(identifier_idx);
-            if (import_used.getKey(identifier) != null) {
-                // Mark import as used
-                try import_used.put(identifier, true);
-            }
+        if (node_type != .simple_var_decl) continue;
+        const import_stmt = tree.simpleVarDecl(@intCast(index));
+        // Skip non-global declarations
+        const first_token = tree.tokens.get(import_stmt.firstToken());
+        if (is_inside_block(block_spans.items, first_token.start))
+            continue;
+
+        // Don't try to delete `pub` statements
+        if (import_stmt.visib_token != null) continue;
+
+        const import_name_idx = import_stmt.ast.mut_token + 1;
+        const import_name = tree.tokenSlice(import_name_idx);
+        try import_index.put(import_name, @intCast(index));
+        try import_used.put(import_name, false);
+    }
+
+    // Pass 3: Check if we use the variable anywhere in the file
+    for (tree.nodes.items(.tag), 0..) |node_type, index| {
+        if (node_type != .field_access and node_type != .identifier) continue;
+        const identifier_idx = tree.firstToken(@intCast(index));
+        const identifier = tree.tokenSlice(identifier_idx);
+        if (import_used.getKey(identifier) != null) {
+            // Mark import as used
+            try import_used.put(identifier, true);
         }
     }
 
@@ -85,8 +128,8 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8) !std.ArrayList
     return unused_imports;
 }
 
-// Returns `true` when lhs shows up before rhs in the file, i.e. the start index of
-// lhs < start index of rhs. Also has checks to ensure the spans never overlap.
+/// Returns `true` when lhs shows up before rhs in the file, i.e. the start index of
+/// lhs < start index of rhs. Also has checks to ensure the spans never overlap.
 fn compare_start(_: void, lhs: ImportSpan, rhs: ImportSpan) bool {
     if (lhs.start_index < rhs.start_index) {
         std.debug.assert(lhs.end_index <= rhs.start_index);
