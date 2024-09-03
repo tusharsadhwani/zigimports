@@ -49,6 +49,10 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8) !std.ArrayList
             .container_decl_two_trailing,
             .container_decl_arg,
             .container_decl_arg_trailing,
+            .tagged_union,
+            .tagged_union_trailing,
+            .tagged_union_two,
+            .tagged_union_two_trailing,
             => {
                 const lbrace = tree.firstToken(@intCast(index));
                 const rbrace = tree.lastToken(@intCast(index));
