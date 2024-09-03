@@ -5,11 +5,6 @@ const zigimports = @import("zigimports.zig");
 fn read_file(al: std.mem.Allocator, filepath: []const u8) ![:0]u8 {
     const file = try std.fs.cwd().openFile(filepath, .{});
     defer file.close();
-    const stat = try file.stat();
-    if (stat.kind == .directory) {
-        return error.IsDir;
-    }
-
     const source = try file.readToEndAllocOptions(
         al,
         std.math.maxInt(usize),
@@ -65,6 +60,37 @@ fn run(al: std.mem.Allocator, filepath: []const u8, fix_mode: bool) !bool {
     return false;
 }
 
+fn get_zig_files(al: std.mem.Allocator, path: []u8) !std.ArrayList([]u8) {
+    var files = std.ArrayList([]u8).init(al);
+    try _get_zig_files(al, &files, path);
+    return files;
+}
+fn _get_zig_files(al: std.mem.Allocator, files: *std.ArrayList([]u8), path: []u8) !void {
+    const file = try std.fs.cwd().openFile(path, .{});
+    defer file.close();
+
+    const stat = try file.stat();
+    switch (stat.kind) {
+        .file => {
+            if (std.mem.eql(u8, std.fs.path.extension(path), ".zig")) {
+                try files.append(try al.dupe(u8, path));
+            }
+        },
+        .directory => {
+            const dir = try std.fs.cwd().openDir(path, .{ .iterate = true });
+            var entries = dir.iterate();
+            while (try entries.next()) |entry| {
+                // Ignore dotted files / folders
+                if (entry.name[0] == '.') continue;
+                const child_path = try std.fs.path.join(al, &.{ path, entry.name });
+                defer al.free(child_path);
+                try _get_zig_files(al, files, child_path);
+            }
+        },
+        else => {}, // TODO: symlinks etc. aren't handled
+    }
+}
+
 pub fn main() !u8 {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer if (gpa.deinit() == .leak) {
@@ -75,21 +101,27 @@ pub fn main() !u8 {
     var args = try std.process.argsAlloc(al);
     defer std.process.argsFree(al, args);
 
-    var filepaths = std.ArrayList([]u8).init(al);
-    defer filepaths.deinit();
+    var paths = std.ArrayList([]u8).init(al);
+    defer paths.deinit();
 
     var fix_mode = false;
     for (args[1..]) |arg| {
         if (std.mem.eql(u8, arg, "--fix"))
             fix_mode = true
         else
-            try filepaths.append(arg);
+            try paths.append(arg);
     }
 
     var failed = false;
-    for (filepaths.items) |filepath| {
-        const unused_imports_found = try run(al, filepath, fix_mode);
-        if (unused_imports_found) failed = true;
+    for (paths.items) |path| {
+        const files = try get_zig_files(al, path);
+        defer files.deinit();
+        defer for (files.items) |file| al.free(file);
+
+        for (files.items) |filepath| {
+            const unused_imports_found = try run(al, filepath, fix_mode);
+            if (unused_imports_found) failed = true;
+        }
     }
 
     return if (failed) 1 else 0;
