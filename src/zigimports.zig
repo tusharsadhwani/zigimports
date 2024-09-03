@@ -70,8 +70,9 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8) !std.ArrayList
         if (is_inside_block(block_spans.items, first_token.start))
             continue;
 
-        // Don't try to delete `pub` statements
-        if (import_stmt.visib_token != null) continue;
+        // Don't try to delete `pub`, `extern` and `export` statements
+        if (import_stmt.visib_token != null or import_stmt.extern_export_token != null)
+            continue;
 
         const import_name_idx = import_stmt.ast.mut_token + 1;
         const import_name = tree.tokenSlice(import_name_idx);
