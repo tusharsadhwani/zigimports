@@ -31,7 +31,7 @@ fn write_file(filepath: []const u8, chunks: [][]u8) !void {
     for (chunks) |chunk| try file.writeAll(chunk);
 }
 
-fn run(al: std.mem.Allocator, filepath: []const u8, fix_mode: bool) !void {
+fn run(al: std.mem.Allocator, filepath: []const u8, fix_mode: bool) !bool {
     const source = try read_file(al, filepath);
     defer al.free(source);
 
@@ -60,10 +60,12 @@ fn run(al: std.mem.Allocator, filepath: []const u8, fix_mode: bool) !void {
                 import.import_name,
             });
         }
+        if (unused_imports.items.len > 0) return true; // Non-zero exit case
     }
+    return false;
 }
 
-pub fn main() !void {
+pub fn main() !u8 {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer if (gpa.deinit() == .leak) {
         std.process.exit(1);
@@ -83,5 +85,12 @@ pub fn main() !void {
         else
             try filepaths.append(arg);
     }
-    for (filepaths.items) |filepath| try run(al, filepath, fix_mode);
+
+    var failed = false;
+    for (filepaths.items) |filepath| {
+        const unused_imports_found = try run(al, filepath, fix_mode);
+        if (unused_imports_found) failed = true;
+    }
+
+    return if (failed) 1 else 0;
 }
