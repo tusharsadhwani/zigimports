@@ -62,9 +62,9 @@ fn run(al: std.mem.Allocator, filepath: []const u8, fix_mode: bool) !bool {
 
 pub fn main() !u8 {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    // defer if (gpa.deinit() == .leak) {
-    //     std.process.exit(1);
-    // };
+    defer if (gpa.deinit() == .leak) {
+        std.process.exit(1);
+    };
     const al = gpa.allocator();
 
     var args = try std.process.argsAlloc(al);
