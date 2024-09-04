@@ -15,6 +15,39 @@ pub const BlockSpan = struct {
     end_index: usize,
 };
 
+/// Resolve file and directory paths recursively, and return a list of Zig files
+/// present in the given paths.
+pub fn get_zig_files(al: std.mem.Allocator, path: []u8) !std.ArrayList([]u8) {
+    var files = std.ArrayList([]u8).init(al);
+    try _get_zig_files(al, &files, path);
+    return files;
+}
+fn _get_zig_files(al: std.mem.Allocator, files: *std.ArrayList([]u8), path: []u8) !void {
+    const file = std.fs.cwd().openFile(path, .{}) catch return;
+    defer file.close();
+
+    const stat = try file.stat();
+    switch (stat.kind) {
+        .file => {
+            if (std.mem.eql(u8, std.fs.path.extension(path), ".zig")) {
+                try files.append(try al.dupe(u8, path));
+            }
+        },
+        .directory => {
+            const dir = try std.fs.cwd().openDir(path, .{ .iterate = true });
+            var entries = dir.iterate();
+            while (try entries.next()) |entry| {
+                // Ignore dotted files / folders
+                if (entry.name[0] == '.') continue;
+                const child_path = try std.fs.path.join(al, &.{ path, entry.name });
+                defer al.free(child_path);
+                try _get_zig_files(al, files, child_path);
+            }
+        },
+        else => {}, // TODO: symlinks etc. aren't handled
+    }
+}
+
 /// Returns if the given source position is inside a block or not.
 /// `true` means that statement it NOT global, `false` means the statement is global.
 fn is_inside_block(blocks: []BlockSpan, source_pos: usize) bool {

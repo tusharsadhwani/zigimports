@@ -60,37 +60,6 @@ fn run(al: std.mem.Allocator, filepath: []const u8, fix_mode: bool) !bool {
     return false;
 }
 
-fn get_zig_files(al: std.mem.Allocator, path: []u8) !std.ArrayList([]u8) {
-    var files = std.ArrayList([]u8).init(al);
-    try _get_zig_files(al, &files, path);
-    return files;
-}
-fn _get_zig_files(al: std.mem.Allocator, files: *std.ArrayList([]u8), path: []u8) !void {
-    const file = std.fs.cwd().openFile(path, .{}) catch return;
-    defer file.close();
-
-    const stat = try file.stat();
-    switch (stat.kind) {
-        .file => {
-            if (std.mem.eql(u8, std.fs.path.extension(path), ".zig")) {
-                try files.append(try al.dupe(u8, path));
-            }
-        },
-        .directory => {
-            const dir = try std.fs.cwd().openDir(path, .{ .iterate = true });
-            var entries = dir.iterate();
-            while (try entries.next()) |entry| {
-                // Ignore dotted files / folders
-                if (entry.name[0] == '.') continue;
-                const child_path = try std.fs.path.join(al, &.{ path, entry.name });
-                defer al.free(child_path);
-                try _get_zig_files(al, files, child_path);
-            }
-        },
-        else => {}, // TODO: symlinks etc. aren't handled
-    }
-}
-
 pub fn main() !u8 {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     // defer if (gpa.deinit() == .leak) {
@@ -114,7 +83,7 @@ pub fn main() !u8 {
 
     var failed = false;
     for (paths.items) |path| {
-        const files = try get_zig_files(al, path);
+        const files = try zigimports.get_zig_files(al, path);
         defer files.deinit();
         defer for (files.items) |file| al.free(file);
 
