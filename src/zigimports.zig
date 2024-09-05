@@ -23,6 +23,7 @@ pub fn get_zig_files(al: std.mem.Allocator, path: []u8) !std.ArrayList([]u8) {
     return files;
 }
 fn _get_zig_files(al: std.mem.Allocator, files: *std.ArrayList([]u8), path: []u8) !void {
+    // openFile fails on symlinks that point to paths that don't exist, skip those
     const file = std.fs.cwd().openFile(path, .{}) catch return;
     defer file.close();
 
@@ -34,7 +35,11 @@ fn _get_zig_files(al: std.mem.Allocator, files: *std.ArrayList([]u8), path: []u8
             }
         },
         .directory => {
-            const dir = try std.fs.cwd().openDir(path, .{ .iterate = true });
+            // openDir fails on symlinks when .no_follow is given, skip those
+            const dir = std.fs.cwd().openDir(
+                path,
+                .{ .iterate = true, .no_follow = true },
+            ) catch return;
             var entries = dir.iterate();
             while (try entries.next()) |entry| {
                 // Ignore dotted files / folders
@@ -44,7 +49,7 @@ fn _get_zig_files(al: std.mem.Allocator, files: *std.ArrayList([]u8), path: []u8
                 try _get_zig_files(al, files, child_path);
             }
         },
-        else => {}, // TODO: symlinks etc. aren't handled
+        else => {},
     }
 }
 
