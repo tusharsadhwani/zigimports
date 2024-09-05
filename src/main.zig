@@ -55,9 +55,8 @@ fn run(al: std.mem.Allocator, filepath: []const u8, fix_mode: bool) !bool {
                 import.import_name,
             });
         }
-        if (unused_imports.items.len > 0) return true; // Non-zero exit case
     }
-    return false;
+    return unused_imports.items.len > 0;
 }
 
 pub fn main() !u8 {
@@ -88,8 +87,22 @@ pub fn main() !u8 {
         defer for (files.items) |file| al.free(file);
 
         for (files.items) |filepath| {
-            const unused_imports_found = try run(al, filepath, fix_mode);
-            if (unused_imports_found) failed = true;
+            if (fix_mode) {
+                // In `--fix` mode, we keep linting and fixing until no lint
+                // issues are found in any file.
+                // FIXME: This is inefficient, as we're linting every single
+                // file at least twice, even if most files didn't even have
+                // unused globals.
+                // Would be better to keep track of which files had to be edited
+                // and only re-check those the next time.
+                while (true) {
+                    const unused_imports_found = try run(al, filepath, fix_mode);
+                    if (!unused_imports_found) break;
+                }
+            } else {
+                const unused_imports_found = try run(al, filepath, fix_mode);
+                if (unused_imports_found) failed = true;
+            }
         }
     }
 
