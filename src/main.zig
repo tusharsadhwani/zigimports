@@ -80,6 +80,11 @@ pub fn main() !u8 {
             try paths.append(arg);
     }
 
+    if (paths.items.len == 0) {
+        std.debug.print("Usage: zigimports [--fix] [paths...]\n", .{});
+        return 2;
+    }
+
     var failed = false;
     for (paths.items) |path| {
         const files = try zigimports.get_zig_files(al, path);
