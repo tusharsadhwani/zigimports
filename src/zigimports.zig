@@ -31,7 +31,7 @@ fn _get_zig_files(al: std.mem.Allocator, files: *std.ArrayList([]u8), path: []u8
     defer file.close();
 
     const stat = try file.stat();
-    std.debug.print("Path {s} is a {s}\n", .{ path, @tagName(stat.kind) });
+    if (debug) std.debug.print("Path {s} is a {s}\n", .{ path, @tagName(stat.kind) });
     switch (stat.kind) {
         .file => {
             if (std.mem.eql(u8, std.fs.path.extension(path), ".zig")) {
