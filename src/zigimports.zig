@@ -19,6 +19,7 @@ pub const BlockSpan = struct {
 /// present in the given paths.
 pub fn get_zig_files(al: std.mem.Allocator, path: []u8, debug: bool) !std.ArrayList([]u8) {
     var files = std.ArrayList([]u8).init(al);
+    errdefer files.deinit();
     try _get_zig_files(al, &files, path, debug);
     return files;
 }
@@ -173,6 +174,7 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) !
     }
 
     var unused_imports = std.ArrayList(ImportSpan).init(al);
+    errdefer unused_imports.deinit();
     var name_iterator = import_used.iterator();
     while (name_iterator.next()) |entry| {
         const import_variable = entry.key_ptr.*;
@@ -240,6 +242,7 @@ pub fn remove_imports(al: std.mem.Allocator, source: [:0]u8, imports: []ImportSp
     std.mem.sort(ImportSpan, imports, {}, compare_start);
 
     var new_spans = std.ArrayList([]u8).init(al);
+    errdefer new_spans.deinit();
     var previous_import = imports[0];
     if (debug) {
         std.debug.print("Unused import statement from {}:{} ({}) to {}:{} ({})\n", .{
