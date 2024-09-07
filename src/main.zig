@@ -26,17 +26,22 @@ fn write_file(filepath: []const u8, chunks: [][]u8) !void {
     for (chunks) |chunk| try file.writeAll(chunk);
 }
 
-fn run(al: std.mem.Allocator, filepath: []const u8, fix_mode: bool) !bool {
+fn run(al: std.mem.Allocator, filepath: []const u8, fix_mode: bool, debug: bool) !bool {
+    if (debug)
+        std.debug.print("-------- Running on file: {s} --------\n", .{filepath});
+
     const source = try read_file(al, filepath);
     defer al.free(source);
 
-    const unused_imports = try zigimports.find_unused_imports(al, source);
+    const unused_imports = try zigimports.find_unused_imports(al, source, debug);
     defer unused_imports.deinit();
+    if (debug)
+        std.debug.print("Found {} unused imports in {s}\n", .{ unused_imports.items.len, filepath });
 
     if (fix_mode) {
         const fix_count = unused_imports.items.len;
         if (fix_count > 0) {
-            const cleaned_sources = try zigimports.remove_imports(al, source, unused_imports.items);
+            const cleaned_sources = try zigimports.remove_imports(al, source, unused_imports.items, debug);
             defer cleaned_sources.deinit();
             try write_file(filepath, cleaned_sources.items);
 
@@ -73,9 +78,12 @@ pub fn main() !u8 {
     defer paths.deinit();
 
     var fix_mode = false;
+    var debug = false;
     for (args[1..]) |arg| {
         if (std.mem.eql(u8, arg, "--fix"))
             fix_mode = true
+        else if (std.mem.eql(u8, arg, "--debug"))
+            debug = true
         else
             try paths.append(arg);
     }
@@ -87,7 +95,7 @@ pub fn main() !u8 {
 
     var failed = false;
     for (paths.items) |path| {
-        const files = try zigimports.get_zig_files(al, path);
+        const files = try zigimports.get_zig_files(al, path, debug);
         defer files.deinit();
         defer for (files.items) |file| al.free(file);
 
@@ -101,11 +109,11 @@ pub fn main() !u8 {
                 // Would be better to keep track of which files had to be edited
                 // and only re-check those the next time.
                 while (true) {
-                    const unused_imports_found = try run(al, filepath, fix_mode);
+                    const unused_imports_found = try run(al, filepath, fix_mode, debug);
                     if (!unused_imports_found) break;
                 }
             } else {
-                const unused_imports_found = try run(al, filepath, fix_mode);
+                const unused_imports_found = try run(al, filepath, fix_mode, debug);
                 if (unused_imports_found) failed = true;
             }
         }
