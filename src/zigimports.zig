@@ -17,20 +17,25 @@ pub const BlockSpan = struct {
 
 /// Resolve file and directory paths recursively, and return a list of Zig files
 /// present in the given paths.
-pub fn get_zig_files(al: std.mem.Allocator, path: []u8) !std.ArrayList([]u8) {
+pub fn get_zig_files(al: std.mem.Allocator, path: []u8, debug: bool) !std.ArrayList([]u8) {
     var files = std.ArrayList([]u8).init(al);
-    try _get_zig_files(al, &files, path);
+    try _get_zig_files(al, &files, path, debug);
     return files;
 }
-fn _get_zig_files(al: std.mem.Allocator, files: *std.ArrayList([]u8), path: []u8) !void {
+fn _get_zig_files(al: std.mem.Allocator, files: *std.ArrayList([]u8), path: []u8, debug: bool) !void {
     // openFile fails on symlinks that point to paths that don't exist, skip those
-    const file = std.fs.cwd().openFile(path, .{}) catch return;
+    const file = std.fs.cwd().openFile(path, .{}) catch |err| {
+        if (debug) std.debug.print("Failed to open {s}: {s}\n", .{ path, @errorName(err) });
+        return;
+    };
     defer file.close();
 
     const stat = try file.stat();
+    std.debug.print("Path {s} is a {s}\n", .{ path, @tagName(stat.kind) });
     switch (stat.kind) {
         .file => {
             if (std.mem.eql(u8, std.fs.path.extension(path), ".zig")) {
+                if (debug) std.debug.print("Storing zig file {s}\n", .{path});
                 try files.append(try al.dupe(u8, path));
             }
         },
@@ -39,14 +44,20 @@ fn _get_zig_files(al: std.mem.Allocator, files: *std.ArrayList([]u8), path: []u8
             const dir = std.fs.cwd().openDir(
                 path,
                 .{ .iterate = true, .no_follow = true },
-            ) catch return;
+            ) catch |err| {
+                if (debug) std.debug.print("Failed to open {s}: {s}\n", .{ path, @errorName(err) });
+                return;
+            };
             var entries = dir.iterate();
             while (try entries.next()) |entry| {
                 // Ignore dotted files / folders
-                if (entry.name[0] == '.') continue;
+                if (entry.name[0] == '.') {
+                    if (debug) std.debug.print("Skipping hidden path {s}\n", .{entry.name});
+                    continue;
+                }
                 const child_path = try std.fs.path.join(al, &.{ path, entry.name });
                 defer al.free(child_path);
-                try _get_zig_files(al, files, child_path);
+                try _get_zig_files(al, files, child_path, debug);
             }
         },
         else => {},

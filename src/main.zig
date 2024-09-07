@@ -95,7 +95,7 @@ pub fn main() !u8 {
 
     var failed = false;
     for (paths.items) |path| {
-        const files = try zigimports.get_zig_files(al, path);
+        const files = try zigimports.get_zig_files(al, path, debug);
         defer files.deinit();
         defer for (files.items) |file| al.free(file);
 
