@@ -26,6 +26,7 @@ pub fn get_zig_files(al: std.mem.Allocator, path: []u8, debug: bool) !std.ArrayL
 fn _get_zig_files(al: std.mem.Allocator, files: *std.ArrayList([]u8), path: []u8, debug: bool) !void {
     // openFile fails on symlinks that point to paths that don't exist, skip those
     const file = std.fs.cwd().openFile(path, .{}) catch |err| {
+        if (err == std.fs.File.OpenError.ProcessFdQuotaExceeded) return err;
         if (debug) std.debug.print("Failed to open {s}: {s}\n", .{ path, @errorName(err) });
         return;
     };
@@ -49,33 +50,22 @@ fn _get_zig_files(al: std.mem.Allocator, files: *std.ArrayList([]u8), path: []u8
                 if (debug) std.debug.print("Failed to open {s}: {s}\n", .{ path, @errorName(err) });
                 return;
             };
-            errdefer dir.close();
+            defer dir.close();
 
-            var dir_iterator = dir.iterate();
-            var entries = try collect(al, &dir_iterator);
-            defer entries.deinit();
-            defer for (entries.items) |entry| al.free(entry);
-            dir.close();
-
-            for (entries.items) |subpath| {
+            var entries = dir.iterate();
+            while (try entries.next()) |entry| {
                 // Ignore dotted files / folders
-                if (subpath[0] == '.') {
-                    if (debug) std.debug.print("Skipping hidden path {s}\n", .{subpath});
+                if (entry.name[0] == '.') {
+                    if (debug) std.debug.print("Skipping hidden path {s}\n", .{entry.name});
                     continue;
                 }
-                const child_path = try std.fs.path.join(al, &.{ path, subpath });
+                const child_path = try std.fs.path.join(al, &.{ path, entry.name });
                 defer al.free(child_path);
                 try _get_zig_files(al, files, child_path, debug);
             }
         },
         else => {},
     }
-}
-
-fn collect(al: std.mem.Allocator, entries: *std.fs.Dir.Iterator) !std.ArrayList([]u8) {
-    var collected = std.ArrayList([]u8).init(al);
-    while (try entries.next()) |entry| try collected.append(try al.dupe(u8, entry.name));
-    return collected;
 }
 
 /// Returns if the given source position is inside a block or not.
