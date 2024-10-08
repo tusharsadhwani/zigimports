@@ -10,7 +10,7 @@ the Zig compiler will simply ignore it.
 
 `zigimports` helps you avoid that by cleaning up unused imports.
 
-> [!NOTE] 
+> [!NOTE]
 > Zig plans to eventually address this issue in the compiler directly:
 > https://github.com/ziglang/zig/issues/335
 
@@ -43,3 +43,6 @@ To tidy up your entire codebase, use:
 ```bash
 zigimports --fix .
 ```
+
+## Development
+There is an optional [Dev Container](https://containers.dev/) configuration and Dockerfile to help setup Zig.
