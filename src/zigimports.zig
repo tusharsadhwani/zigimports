@@ -79,13 +79,13 @@ fn is_inside_block(blocks: []BlockSpan, source_pos: usize) bool {
     return false;
 }
 
-pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) !std.ArrayList(ImportSpan) {
+pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]const u8, debug: bool) !std.ArrayList(ImportSpan) {
     const imports = try find_imports(al, source, debug);
     defer al.free(imports);
     return try identifyUnusedImports(al, imports, source, debug);
 }
 
-pub fn find_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) ![]ImportSpan {
+pub fn find_imports(al: std.mem.Allocator, source: [:0]const u8, debug: bool) ![]ImportSpan {
     var tree = try std.zig.Ast.parse(al, source, .zig);
     defer tree.deinit(al);
 
@@ -202,7 +202,7 @@ pub fn find_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) ![]Impor
     return imports.toOwnedSlice();
 }
 
-pub fn identifyUnusedImports(al: std.mem.Allocator, imports: []ImportSpan, source: [:0]u8, debug: bool) !std.ArrayList(ImportSpan) {
+pub fn identifyUnusedImports(al: std.mem.Allocator, imports: []ImportSpan, source: [:0]const u8, debug: bool) !std.ArrayList(ImportSpan) {
     var tree = try std.zig.Ast.parse(al, source, .zig);
     defer tree.deinit(al);
 
@@ -257,11 +257,11 @@ fn compare_start(_: void, lhs: ImportSpan, rhs: ImportSpan) bool {
     return false;
 }
 
-pub fn remove_imports(al: std.mem.Allocator, source: [:0]u8, imports: []ImportSpan, debug: bool) !std.ArrayList([]u8) {
+pub fn remove_imports(al: std.mem.Allocator, source: [:0]const u8, imports: []ImportSpan, debug: bool) !std.ArrayList([]const u8) {
     std.debug.assert(imports.len > 0);
     std.mem.sort(ImportSpan, imports, {}, compare_start);
 
-    var new_spans = std.ArrayList([]u8).init(al);
+    var new_spans = std.ArrayList([]const u8).init(al);
     errdefer new_spans.deinit();
     var previous_import = imports[0];
     if (debug) {
@@ -294,4 +294,47 @@ pub fn remove_imports(al: std.mem.Allocator, source: [:0]u8, imports: []ImportSp
     try new_spans.append(source[previous_import.end_index..]);
     if (debug) std.debug.print("Keeping source from {} to the end.\n", .{previous_import.end_index});
     return new_spans;
+}
+
+fn convertChunksToString(al: std.mem.Allocator, chunks: [][]const u8) ![]u8 {
+    var result = try std.ArrayList(u8).initCapacity(al, 1024);
+    defer result.deinit();
+
+    for (chunks) |chunk| {
+        try result.appendSlice(chunk);
+    }
+
+    return result.toOwnedSlice();
+}
+
+test "base-delete" {
+    const allocator = std.testing.allocator;
+
+    const input =
+        \\const std = @import("std");
+        \\const unused = @import("unused");
+        \\pub fn main() void {
+        \\    std.debug.print("Hi", .{});
+        \\}
+        \\
+    ;
+
+    const expected_output =
+        \\const std = @import("std");
+        \\pub fn main() void {
+        \\    std.debug.print("Hi", .{});
+        \\}
+        \\
+    ;
+
+    const unused_imports = try find_unused_imports(allocator, input, false);
+    defer unused_imports.deinit();
+
+    const new_chunks = try remove_imports(allocator, input, unused_imports.items, false);
+    defer new_chunks.deinit();
+
+    const new_content = try convertChunksToString(allocator, new_chunks.items);
+    defer allocator.free(new_content);
+
+    try std.testing.expectEqualStrings(expected_output, new_content);
 }

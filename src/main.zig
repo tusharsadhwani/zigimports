@@ -15,7 +15,7 @@ fn read_file(al: std.mem.Allocator, filepath: []const u8) ![:0]u8 {
     return source;
 }
 
-fn write_file(filepath: []const u8, chunks: [][]u8) !void {
+fn write_file(filepath: []const u8, chunks: [][]const u8) !void {
     const file = try std.fs.cwd().createFile(filepath, .{});
     defer file.close();
     const stat = try file.stat();
