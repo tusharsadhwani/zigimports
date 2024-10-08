@@ -80,14 +80,16 @@ fn is_inside_block(blocks: []BlockSpan, source_pos: usize) bool {
 }
 
 pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) !std.ArrayList(ImportSpan) {
+    const imports = try find_imports(al, source, debug);
+    defer al.free(imports);
+    return try identifyUnusedImports(al, imports, source, debug);
+}
+
+pub fn find_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) ![]ImportSpan {
     var tree = try std.zig.Ast.parse(al, source, .zig);
     defer tree.deinit(al);
 
-    var import_index = std.StringHashMap(u32).init(al);
-    var import_used = std.StringHashMap(bool).init(al);
     var block_spans = std.ArrayList(BlockSpan).init(al);
-    defer import_index.deinit();
-    defer import_used.deinit();
     defer block_spans.deinit();
     // Pass 1: Find the spans of all block scopes
     for (tree.nodes.items(.tag), 0..) |node_type, index| {
@@ -130,6 +132,8 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) !
         }
     }
 
+    var imports = std.ArrayList(ImportSpan).init(al);
+    errdefer imports.deinit();
     // Pass 2: Find all global variable declarations
     for (tree.nodes.items(.tag), 0..) |node_type, index| {
         if (node_type != .simple_var_decl) continue;
@@ -157,13 +161,63 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) !
 
         const import_name_idx = import_stmt.ast.mut_token + 1;
         const import_name = tree.tokenSlice(import_name_idx);
-        try import_index.put(import_name, @intCast(index));
-        if (debug and import_used.get(import_name) == null)
-            std.debug.print("Found new global: {s}\n", .{import_name});
-        try import_used.put(import_name, false);
+        const first_token_idx = tree.firstToken(@intCast(index));
+        const start_location = tree.tokenLocation(0, first_token_idx);
+        const last_token = tree.lastToken(@intCast(index));
+
+        const semicolon = last_token + 1;
+        var end_location = tree.tokenLocation(0, semicolon);
+        // If the semicolon is followed by newlines, include those too
+        const start_index = tree.tokenToSpan(first_token_idx).start;
+        var end_index = tree.tokenToSpan(semicolon).end;
+        if (source.len > end_index and source[end_index] == '\n') {
+            end_index += 1;
+            end_location.line += 1;
+            end_location.column = 0;
+
+            // If the statement has at least two leading and at least two trailing
+            // newlines, then remove two trailing newlines.
+            // For well-formatted zig code, this will ensure that if the import was
+            // on its own little section surrounded by empty lines, the whole
+            // section is deleted.
+            if (start_index > 1 and source[start_index - 1] == '\n' and source[start_index - 2] == '\n' and source.len > end_index and source[end_index] == '\n') {
+                end_index += 1;
+                end_location.line += 1;
+                end_location.column = 0;
+            }
+        }
+
+        const span = ImportSpan{
+            .import_name = import_name,
+            .start_index = start_index,
+            .end_index = end_index,
+            .start_line = start_location.line + 1,
+            .start_column = start_location.column,
+            .end_line = end_location.line + 1,
+            .end_column = end_location.column + tree.tokenSlice(semicolon).len,
+        };
+        try imports.append(span);
     }
 
-    // Pass 3: Check if we use the variable anywhere in the file
+    return imports.toOwnedSlice();
+}
+
+pub fn identifyUnusedImports(al: std.mem.Allocator, imports: []ImportSpan, source: [:0]u8, debug: bool) !std.ArrayList(ImportSpan) {
+    var tree = try std.zig.Ast.parse(al, source, .zig);
+    defer tree.deinit(al);
+
+    var import_index = std.StringHashMap(usize).init(al);
+    var import_used = std.StringHashMap(bool).init(al);
+    defer import_index.deinit();
+    defer import_used.deinit();
+
+    // Store all imports in the hashmap
+    for (imports, 0..) |import_span, index| {
+        try import_index.put(import_span.import_name, index);
+        try import_used.put(import_span.import_name, false);
+    }
+
+    // Check if we use the variable anywhere in the file
     for (tree.nodes.items(.tag), 0..) |node_type, index| {
         if (node_type != .field_access and node_type != .identifier) continue;
         const identifier_idx = tree.firstToken(@intCast(index));
@@ -185,49 +239,12 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) !
         if (!is_used) {
             if (debug) std.debug.print("Found unused identifier: {s}\n", .{import_variable});
             const node_index = import_index.get(import_variable).?;
-
-            const first_token = tree.firstToken(node_index);
-            const start_location = tree.tokenLocation(0, first_token);
-            const last_token = tree.lastToken(node_index);
-
-            const semicolon = last_token + 1;
-            var end_location = tree.tokenLocation(0, semicolon);
-            // If the semicolon is followed by a newlines, delete those too
-            const start_index = tree.tokenToSpan(first_token).start;
-            var end_index = tree.tokenToSpan(semicolon).end;
-            if (source.len > end_index and source[end_index] == '\n') {
-                end_index += 1;
-                end_location.line += 1;
-                end_location.column = 0;
-
-                // If the statement has at least two leading and at least two trailing
-                // newlines, then remove two trailing newlines.
-                // For well-formatted zig code, this will ensure that if the import was
-                // on its own little section surrounded by empty lines, the whole
-                // section is deleted.
-                if (start_index > 1 and source[start_index - 1] == '\n' and source[start_index - 2] == '\n' and source.len > end_index and source[end_index] == '\n') {
-                    end_index += 1;
-                    end_location.line += 1;
-                    end_location.column = 0;
-                }
-            }
-
-            const span = ImportSpan{
-                .import_name = import_variable,
-                .start_index = start_index,
-                .end_index = end_index,
-                .start_line = start_location.line + 1,
-                .start_column = start_location.column,
-                .end_line = end_location.line + 1,
-                .end_column = end_location.column + tree.tokenSlice(semicolon).len,
-            };
-            try unused_imports.append(span);
+            try unused_imports.append(imports[node_index]);
         }
     }
 
     return unused_imports;
 }
-
 /// Returns `true` when lhs shows up before rhs in the file, i.e. the start index of
 /// lhs < start index of rhs. Also has checks to ensure the spans never overlap.
 fn compare_start(_: void, lhs: ImportSpan, rhs: ImportSpan) bool {
