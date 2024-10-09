@@ -90,12 +90,6 @@ fn is_inside_block(blocks: []BlockSpan, source_pos: usize) bool {
     return false;
 }
 
-pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]const u8, debug: bool) !std.ArrayList(ImportSpan) {
-    const imports = try find_imports(al, source, debug);
-    defer al.free(imports);
-    return try identifyUnusedImports(al, imports, source, debug);
-}
-
 pub fn find_imports(al: std.mem.Allocator, source: [:0]const u8, debug: bool) ![]ImportSpan {
     var tree = try std.zig.Ast.parse(al, source, .zig);
     defer tree.deinit(al);
@@ -384,7 +378,10 @@ test "base-delete" {
         \\
     ;
 
-    const unused_imports = try find_unused_imports(allocator, input, false);
+    const imports = try find_imports(allocator, input, false);
+    defer imports.deinit();
+
+    const unused_imports = try identifyUnusedImports(allocator, imports, input, false);
     defer unused_imports.deinit();
 
     const new_chunks = try remove_imports(allocator, input, unused_imports.items, false);
