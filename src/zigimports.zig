@@ -1,5 +1,12 @@
 const std = @import("std");
 
+const ImportKind = enum(u8) {
+    Builtin,
+    ThirdParty,
+    Local,
+    Specific,
+};
+
 pub const ImportSpan = struct {
     import_name: []const u8,
     start_index: usize,
@@ -8,6 +15,10 @@ pub const ImportSpan = struct {
     start_column: usize,
     end_line: usize,
     end_column: usize,
+    module_start: u64,
+    module: []const u8,
+    kind: ImportKind,
+    full_import: []const u8,
 };
 
 pub const BlockSpan = struct {
@@ -161,6 +172,47 @@ pub fn find_imports(al: std.mem.Allocator, source: [:0]const u8, debug: bool) ![
 
         const import_name_idx = import_stmt.ast.mut_token + 1;
         const import_name = tree.tokenSlice(import_name_idx);
+
+        var token_idx = import_name_idx;
+        var module_start: usize = 0;
+        var module: []const u8 = "";
+        var kind: ImportKind = .ThirdParty;
+        var full_import_start: usize = 0;
+        var full_import_end: usize = 0;
+        var found_import = false;
+
+        while (token_idx < tree.tokens.len) {
+            const token = tree.tokenSlice(token_idx);
+            if (std.mem.eql(u8, token, "@import")) {
+                full_import_start = tree.tokenToSpan(token_idx).start;
+                const next_token_idx = token_idx + 2;
+                if (next_token_idx < tree.tokens.len) {
+                    module_start = tree.tokenToSpan(next_token_idx).start;
+                    module = tree.tokenSlice(next_token_idx);
+                    // remove quotes
+                    module = module[1 .. module.len - 1];
+                    found_import = true;
+                }
+            } else if (found_import and (std.mem.eql(u8, token, ";") or std.mem.eql(u8, token, "."))) {
+                full_import_end = tree.tokenToSpan(token_idx + 1).end;
+                break;
+            }
+            token_idx += 1;
+        }
+
+        if (!found_import) continue;
+
+        // Determine kind
+        const is_builtin = std.mem.eql(u8, module, "std") or
+            std.mem.eql(u8, module, "root") or
+            std.mem.eql(u8, module, "builtin");
+
+        const is_local = std.mem.endsWith(u8, module, ".zig");
+
+        const is_specific = std.mem.containsAtLeast(u8, module, 1, ".") and !is_local;
+
+        kind = if (is_builtin) ImportKind.Builtin else if (is_local) ImportKind.Local else if (is_specific) ImportKind.Specific else ImportKind.ThirdParty;
+
         const first_token_idx = tree.firstToken(@intCast(index));
         const start_location = tree.tokenLocation(0, first_token_idx);
         const last_token = tree.lastToken(@intCast(index));
@@ -195,7 +247,12 @@ pub fn find_imports(al: std.mem.Allocator, source: [:0]const u8, debug: bool) ![
             .start_column = start_location.column,
             .end_line = end_location.line + 1,
             .end_column = end_location.column + tree.tokenSlice(semicolon).len,
+            .module_start = module_start - start_index,
+            .module = module,
+            .kind = kind,
+            .full_import = source[full_import_start .. end_index - 2],
         };
+        std.debug.print("module: {s} full_import: {s} kind: {s}\n", .{ span.module, span.full_import, @tagName(span.kind) });
         try imports.append(span);
     }
 
