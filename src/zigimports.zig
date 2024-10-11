@@ -465,7 +465,7 @@ test "base-delete" {
     ;
 
     const imports = try find_imports(allocator, input, false);
-    defer imports.deinit();
+    defer allocator.free(imports);
 
     const unused_imports = try identifyUnusedImports(allocator, imports, input, false);
     defer unused_imports.deinit();

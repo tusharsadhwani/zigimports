@@ -15,7 +15,7 @@ fn read_file(al: std.mem.Allocator, filepath: []const u8) ![:0]u8 {
     return source;
 }
 
-fn write_file(filepath: []const u8, chunks: []const u8) !void {
+fn write_file(filepath: []const u8, content: []const u8) !void {
     const file = try std.fs.cwd().createFile(filepath, .{});
     defer file.close();
     const stat = try file.stat();
@@ -23,10 +23,10 @@ fn write_file(filepath: []const u8, chunks: []const u8) !void {
         return error.IsDir;
     }
 
-    try file.writeAll(chunks);
+    try file.writeAll(content);
 }
 
-fn write_cleaned_file(al: std.mem.Allocator, filepath: []const u8, imports: []zigimports.ImportSpan, source: [:0]const u8, unused_imports: []zigimports.ImportSpan) !void {
+fn clean_content(al: std.mem.Allocator, imports: []zigimports.ImportSpan, source: [:0]const u8, unused_imports: []zigimports.ImportSpan) ![]u8 {
     var filtered_imports = try al.alloc(zigimports.ImportSpan, imports.len);
     defer al.free(filtered_imports);
 
@@ -48,7 +48,6 @@ fn write_cleaned_file(al: std.mem.Allocator, filepath: []const u8, imports: []zi
     const final_filtered_imports = filtered_imports[0..filtered_count];
 
     var new_content = std.ArrayList(u8).init(al);
-    defer new_content.deinit();
 
     // Add sorted imports to the top of the new content
     var current_kind: ?zigimports.ImportKind = null;
@@ -88,13 +87,7 @@ fn write_cleaned_file(al: std.mem.Allocator, filepath: []const u8, imports: []zi
         line_start = actual_line_end;
     }
 
-    try write_file(filepath, new_content.items);
-
-    std.debug.print("{s} - Removed {} unused import{s}\n", .{
-        filepath,
-        unused_imports.len,
-        if (unused_imports.len == 1) "" else "s",
-    });
+    return new_content.toOwnedSlice();
 }
 
 fn run(al: std.mem.Allocator, filepath: []const u8, fix_mode: bool, debug: bool) !bool {
@@ -116,7 +109,16 @@ fn run(al: std.mem.Allocator, filepath: []const u8, fix_mode: bool, debug: bool)
         std.debug.print("Found {} unused imports in {s}\n", .{ unused_imports.items.len, filepath });
 
     if (unused_imports.items.len > 0 and fix_mode) {
-        try write_cleaned_file(al, filepath, imports, source, unused_imports.items);
+        const cleaned_content = try clean_content(al, imports, source, unused_imports.items);
+        defer al.free(cleaned_content);
+
+        try write_file(filepath, cleaned_content);
+
+        std.debug.print("{s} - Removed {} unused import{s}\n", .{
+            filepath,
+            unused_imports.items.len,
+            if (unused_imports.items.len == 1) "" else "s",
+        });
         return true;
     } else {
         for (unused_imports.items) |import| {
@@ -187,4 +189,65 @@ pub fn main() !u8 {
     }
 
     return if (failed) 1 else 0;
+}
+
+test "basic" {
+    const allocator = std.testing.allocator;
+
+    const input =
+        \\const zig = @import("std").zig;
+        \\const root = @import("root");
+        \\const foo = @import("foo");
+        \\const Two = @import("baz.zig").Two;
+        \\const debug = @import("std").debug;
+        \\const print = @import("std").debug.print;
+        \\const bar = @import("bar");
+        \\const One = @import("baz.zig").One;
+        \\const builtin = @import("builtin");
+        \\const std = @import("std");
+        \\
+        \\pub fn hi() void {
+        \\  print("hi");
+        \\  One.add;
+        \\  foo.bar();
+        \\}
+        \\
+        \\pub fn bye() void {
+        \\  print("bye");
+        \\  builtin.is_test;
+        \\}
+    ;
+
+    const expected_output =
+        \\const builtin = @import("builtin");
+        \\const print = @import("std").debug.print;
+        \\
+        \\const foo = @import("foo");
+        \\
+        \\const One = @import("baz.zig").One;
+        \\
+        \\pub fn hi() void {
+        \\  print("hi");
+        \\  One.add;
+        \\  foo.bar();
+        \\}
+        \\
+        \\pub fn bye() void {
+        \\  print("bye");
+        \\  builtin.is_test;
+        \\}
+    ;
+
+    const imports = try zigimports.find_imports(allocator, input, false);
+    defer allocator.free(imports);
+
+    std.sort.insertion(zigimports.ImportSpan, imports, {}, zigimports.compareImports);
+
+    const unused_imports = try zigimports.identifyUnusedImports(allocator, imports, input, false);
+    defer unused_imports.deinit();
+
+    const new_content = try clean_content(allocator, imports, input, unused_imports.items);
+    defer allocator.free(new_content);
+
+    try std.testing.expectEqualStrings(expected_output, new_content);
 }
