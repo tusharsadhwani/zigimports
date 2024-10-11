@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const ImportKind = enum(u8) {
+pub const ImportKind = enum(u8) {
     Builtin,
     ThirdParty,
     Local,
@@ -438,6 +438,8 @@ pub fn newSourceFromImports(allocator: std.mem.Allocator, source: [:0]const u8, 
 
         line_start = actual_line_end;
     }
+
+    print("{s}\n", .{new_content.items});
 
     return new_content;
 }
