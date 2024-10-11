@@ -26,26 +26,7 @@ fn write_file(filepath: []const u8, chunks: [][]const u8) !void {
     for (chunks) |chunk| try file.writeAll(chunk);
 }
 
-fn find_unused_imports(al: std.mem.Allocator, filepath: []const u8, debug: bool) !std.ArrayList(zigimports.ImportSpan) {
-    if (debug)
-        std.debug.print("-------- Finding unused imports in file: {s} --------\n", .{filepath});
-
-    const source = try read_file(al, filepath);
-    defer al.free(source);
-
-    const unused_imports = try zigimports.find_unused_imports(al, source, debug);
-    for (unused_imports.items) |import| {
-        std.debug.print("{s}:{}:{}: {s} is unused\n", .{
-            filepath,
-            import.start_line,
-            import.start_column,
-            import.import_name,
-        });
-    }
-    return unused_imports;
-}
-
-fn fixImports(al: std.mem.Allocator, filepath: []const u8, unused_imports: []zigimports.ImportSpan, debug: bool) !void {
+fn removeImports(al: std.mem.Allocator, filepath: []const u8, unused_imports: []zigimports.ImportSpan, debug: bool) !void {
     const fix_count = unused_imports.len;
     if (fix_count > 0) {
         const source = try read_file(al, filepath);
@@ -64,14 +45,39 @@ fn fixImports(al: std.mem.Allocator, filepath: []const u8, unused_imports: []zig
 }
 
 fn run(al: std.mem.Allocator, filepath: []const u8, fix_mode: bool, debug: bool) !bool {
-    const unused_imports = try find_unused_imports(al, filepath, debug);
+    if (debug)
+        std.debug.print("-------- Running on file: {s} --------\n", .{filepath});
+
+    const source = try read_file(al, filepath);
+    defer al.free(source);
+
+    const imports = try zigimports.find_imports(al, source, debug);
+    defer al.free(imports);
+
+    const unused_imports = try zigimports.identifyUnusedImports(al, imports, source, debug);
     defer unused_imports.deinit();
+
     if (debug)
         std.debug.print("Found {} unused imports in {s}\n", .{ unused_imports.items.len, filepath });
 
+    std.sort.insertion(zigimports.ImportSpan, imports, {}, zigimports.compareImports);
+
+    const new_source = try zigimports.newSourceFromImports(al, source, imports);
+    defer new_source.deinit();
+
     if (unused_imports.items.len > 0 and fix_mode) {
-        try fixImports(al, filepath, unused_imports.items, debug);
+        try removeImports(al, filepath, unused_imports.items, debug);
         return true;
+    } else {
+        for (unused_imports.items) |import| {
+            std.debug.print("{s}:{}:{}: {s} is unused\n", .{
+                filepath,
+                import.start_line,
+                import.start_column,
+                import.import_name,
+            });
+        }
+        std.debug.print("\nOrganized imports:\n{s}", .{new_source.items});
     }
     return false;
 }

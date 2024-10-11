@@ -15,7 +15,7 @@ pub const ImportSpan = struct {
     start_column: usize,
     end_line: usize,
     end_column: usize,
-    module_start: u64,
+    module_start: usize,
     module: []const u8,
     kind: ImportKind,
     full_import: []const u8,
@@ -181,7 +181,7 @@ pub fn find_imports(al: std.mem.Allocator, source: [:0]const u8, debug: bool) ![
                 full_import_start = tree.tokenToSpan(token_idx).start;
                 const next_token_idx = token_idx + 2;
                 if (next_token_idx < tree.tokens.len) {
-                    module_start = tree.tokenToSpan(next_token_idx).start;
+                    module_start = tree.tokenToSpan(next_token_idx).start - full_import_start;
                     module = tree.tokenSlice(next_token_idx);
                     // remove quotes
                     module = module[1 .. module.len - 1];
@@ -214,7 +214,7 @@ pub fn find_imports(al: std.mem.Allocator, source: [:0]const u8, debug: bool) ![
         const semicolon = last_token + 1;
         var end_location = tree.tokenLocation(0, semicolon);
         // If the semicolon is followed by newlines, include those too
-        const start_index = tree.tokenToSpan(first_token_idx).start;
+        const start_index: usize = tree.tokenToSpan(first_token_idx).start;
         var end_index = tree.tokenToSpan(semicolon).end;
         if (source.len > end_index and source[end_index] == '\n') {
             end_index += 1;
@@ -241,12 +241,11 @@ pub fn find_imports(al: std.mem.Allocator, source: [:0]const u8, debug: bool) ![
             .start_column = start_location.column,
             .end_line = end_location.line + 1,
             .end_column = end_location.column + tree.tokenSlice(semicolon).len,
-            .module_start = module_start - start_index,
+            .module_start = module_start,
             .module = module,
             .kind = kind,
             .full_import = source[full_import_start .. end_index - 2],
         };
-        std.debug.print("module: {s} full_import: {s} kind: {s}\n", .{ span.module, span.full_import, @tagName(span.kind) });
         try imports.append(span);
     }
 
@@ -356,6 +355,91 @@ fn convertChunksToString(al: std.mem.Allocator, chunks: [][]const u8) ![]u8 {
     }
 
     return result.toOwnedSlice();
+}
+
+pub fn compareImports(_: void, lhs: ImportSpan, rhs: ImportSpan) bool {
+    // Compare by kind
+    if (@intFromEnum(lhs.kind) != @intFromEnum(rhs.kind)) {
+        return @intFromEnum(lhs.kind) < @intFromEnum(rhs.kind);
+    }
+
+    // Compare by module name
+    const order = std.mem.order(u8, lhs.module, rhs.module);
+    if (order == .lt) {
+        return true;
+    } else if (order == .gt) {
+        return false;
+    }
+
+    // If modules are equal, compare by extra paths
+    const lhs_extra = lhs.full_import[lhs.module_start + lhs.module.len .. lhs.full_import.len];
+    const rhs_extra = rhs.full_import[rhs.module_start + rhs.module.len .. rhs.full_import.len];
+    const extra_order = std.mem.order(u8, lhs_extra, rhs_extra);
+    if (extra_order == .lt) {
+        return true;
+    } else if (extra_order == .gt) {
+        return false;
+    }
+
+    // If equal, compare by the number of "." to sort by scope
+    const lhs_scope = std.mem.count(u8, lhs.module, ".");
+    const rhs_scope = std.mem.count(u8, rhs.module, ".");
+    if (lhs_scope != rhs_scope) {
+        return lhs_scope < rhs_scope;
+    }
+    // If the number of "." is the same, compare by length to sort by specificity
+    if (lhs.module.len != rhs.module.len) {
+        return lhs.module.len < rhs.module.len;
+    }
+
+    // If everything else is equal, compare by original line number
+    return lhs.start_line < rhs.start_line;
+}
+
+const print = std.debug.print;
+
+pub fn newSourceFromImports(allocator: std.mem.Allocator, source: [:0]const u8, imports: []ImportSpan) !std.ArrayList(u8) {
+    var new_content = std.ArrayList(u8).init(allocator);
+
+    // Add sorted imports to the top of the new content
+    var current_kind: ?ImportKind = null;
+    for (imports) |imp| {
+        if (current_kind != imp.kind) {
+            if (current_kind != null) {
+                // Ensure a newline between different import groups
+                try new_content.appendSlice(&[_]u8{'\n'});
+            }
+            current_kind = imp.kind;
+        }
+        try new_content.appendSlice(source[imp.start_index..imp.end_index]);
+    }
+
+    // Set line_start to the end of the import block to start copying the rest of the file
+    var line_start: usize = imports[imports.len - 1].end_index;
+
+    // Copy the rest of the file, excluding the original import lines
+    while (line_start < source.len) {
+        const line_end = std.mem.indexOfScalarPos(u8, source, line_start, '\n');
+        const actual_line_end = if (line_end == null) source.len else line_end.? + 1;
+
+        const line = source[line_start..actual_line_end];
+
+        var is_import_line = false;
+        for (imports) |imp| {
+            if (line_start == imp.start_index) {
+                is_import_line = true;
+                break;
+            }
+        }
+
+        if (!is_import_line) {
+            try new_content.appendSlice(line);
+        }
+
+        line_start = actual_line_end;
+    }
+
+    return new_content;
 }
 
 test "base-delete" {
