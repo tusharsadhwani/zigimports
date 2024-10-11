@@ -46,3 +46,8 @@ zigimports --fix .
 
 ## Development
 There is an optional [Dev Container](https://containers.dev/) configuration and Dockerfile to help setup Zig.
+
+## About this fork
+After using Zig for a couple weeks, I began to miss how `go fmt` automatically sorted imports and deleted unused ones. I started to investigate such capabilities and found tusharsadhwani's project. This was great but it was missing my desired feature of sorting imports.
+
+I was able to get a basic program for identifying and sorting imports that's heavily inspired by `go fmt`, then I I forked and integrated my changes in. The scope of the project was dramatically changed, so the refactor to get the changes in were too. I tried to do the commits in a sensible order.
