@@ -51,6 +51,7 @@ fn clean_content(al: std.mem.Allocator, imports: []zigimports.ImportSpan, source
 
     // Add sorted imports to the top of the new content
     var current_kind: ?zigimports.ImportKind = null;
+    var last_import_line: usize = 0;
     for (final_filtered_imports) |imp| {
         if (current_kind != imp.kind) {
             if (current_kind != null) {
@@ -59,11 +60,14 @@ fn clean_content(al: std.mem.Allocator, imports: []zigimports.ImportSpan, source
             }
             current_kind = imp.kind;
         }
+        // std.debug.print("appending: {s} {d}\n", .{ source[imp.start_index..imp.end_index], imp.start_line });
         try new_content.appendSlice(source[imp.start_index..imp.end_index]);
+        last_import_line = new_content.items.len;
     }
 
     // Set line_start to the end of the import block to start copying the rest of the file
-    var line_start: usize = final_filtered_imports[final_filtered_imports.len - 1].end_index;
+    // var line_start: usize = final_filtered_imports[final_filtered_imports.len - 1].end_index;
+    var line_start: usize = 0;
 
     // Copy the rest of the file, excluding the original import lines
     while (line_start < source.len) {
@@ -78,6 +82,12 @@ fn clean_content(al: std.mem.Allocator, imports: []zigimports.ImportSpan, source
                 is_import_line = true;
                 break;
             }
+        }
+
+        if (line_start <= last_import_line and std.mem.eql(u8, line, "\n")) {
+            std.debug.print("skipping already handled newline: {s}\n", .{line});
+            line_start = actual_line_end;
+            continue;
         }
 
         if (!is_import_line) {
@@ -235,6 +245,46 @@ test "basic" {
         \\pub fn bye() void {
         \\  print("bye");
         \\  builtin.is_test;
+        \\}
+    ;
+
+    const imports = try zigimports.find_imports(allocator, input, false);
+    defer allocator.free(imports);
+
+    std.sort.insertion(zigimports.ImportSpan, imports, {}, zigimports.compareImports);
+
+    const unused_imports = try zigimports.identifyUnusedImports(allocator, imports, input, false);
+    defer unused_imports.deinit();
+
+    const new_content = try clean_content(allocator, imports, input, unused_imports.items);
+    defer allocator.free(new_content);
+
+    try std.testing.expectEqualStrings(expected_output, new_content);
+}
+
+test "global assignment between imports" {
+    const allocator = std.testing.allocator;
+
+    const input =
+        \\const std = @import("std");
+        \\const print = std.debug.print;
+        \\const config = @import("config");
+        \\pub fn foo() void {
+        \\  std.fake;
+        \\  print("test");
+        \\  config.import;
+        \\}
+    ;
+
+    const expected_output =
+        \\const std = @import("std");
+        \\
+        \\const config = @import("config");
+        \\const print = std.debug.print;
+        \\pub fn foo() void {
+        \\  std.fake;
+        \\  print("test");
+        \\  config.import;
         \\}
     ;
 

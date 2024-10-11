@@ -187,7 +187,7 @@ pub fn find_imports(al: std.mem.Allocator, source: [:0]const u8, debug: bool) ![
                     module = module[1 .. module.len - 1];
                     found_import = true;
                 }
-            } else if (found_import and (std.mem.eql(u8, token, ";") or std.mem.eql(u8, token, "."))) {
+            } else if (std.mem.eql(u8, token, ";") or std.mem.eql(u8, token, ".")) {
                 full_import_end = tree.tokenToSpan(token_idx + 1).end;
                 break;
             }
@@ -432,7 +432,9 @@ pub fn newSourceFromImports(allocator: std.mem.Allocator, source: [:0]const u8, 
             }
         }
 
+        print("line: {s}", .{});
         if (!is_import_line) {
+            print("added \n", .{});
             try new_content.appendSlice(line);
         }
 
