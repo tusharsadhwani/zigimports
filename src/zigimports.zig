@@ -1,5 +1,4 @@
 const std = @import("std");
-
 pub const ImportKind = enum(u8) {
     Builtin,
     ThirdParty,
@@ -220,17 +219,6 @@ pub fn find_imports(al: std.mem.Allocator, source: [:0]const u8, debug: bool) ![
             end_index += 1;
             end_location.line += 1;
             end_location.column = 0;
-
-            // If the statement has at least two leading and at least two trailing
-            // newlines, then remove two trailing newlines.
-            // For well-formatted zig code, this will ensure that if the import was
-            // on its own little section surrounded by empty lines, the whole
-            // section is deleted.
-            if (start_index > 1 and source[start_index - 1] == '\n' and source[start_index - 2] == '\n' and source.len > end_index and source[end_index] == '\n') {
-                end_index += 1;
-                end_location.line += 1;
-                end_location.column = 0;
-            }
         }
 
         const span = ImportSpan{
