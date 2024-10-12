@@ -1,7 +1,6 @@
 const std = @import("std");
 
 const zigimports = @import("zigimports.zig");
-
 fn read_file(al: std.mem.Allocator, filepath: []const u8) ![:0]u8 {
     const file = try std.fs.cwd().openFile(filepath, .{});
     defer file.close();
@@ -26,7 +25,7 @@ fn write_file(filepath: []const u8, content: []const u8) !void {
     try file.writeAll(content);
 }
 
-fn clean_content(al: std.mem.Allocator, imports: []zigimports.ImportSpan, source: [:0]const u8, unused_imports: []zigimports.ImportSpan) ![]u8 {
+fn clean_content(al: std.mem.Allocator, imports: []zigimports.ImportSpan, source: [:0]const u8, unused_imports: []zigimports.ImportSpan, debug: bool) ![]u8 {
     var filtered_imports = try al.alloc(zigimports.ImportSpan, imports.len);
     defer al.free(filtered_imports);
 
@@ -53,6 +52,7 @@ fn clean_content(al: std.mem.Allocator, imports: []zigimports.ImportSpan, source
     var current_kind: ?zigimports.ImportKind = null;
     var last_import_line: usize = 0;
     for (final_filtered_imports) |imp| {
+        if (debug) std.debug.print("imp: {s}\n", .{imp.full_import});
         if (current_kind != imp.kind) {
             if (current_kind != null) {
                 // Ensure a newline between different import groups
@@ -60,10 +60,12 @@ fn clean_content(al: std.mem.Allocator, imports: []zigimports.ImportSpan, source
             }
             current_kind = imp.kind;
         }
-        // std.debug.print("appending: {s} {d}\n", .{ source[imp.start_index..imp.end_index], imp.start_line });
+        if (debug) std.debug.print("appending: {s} {d}\n", .{ source[imp.start_index..imp.end_index], imp.start_line });
         try new_content.appendSlice(source[imp.start_index..imp.end_index]);
         last_import_line = new_content.items.len;
     }
+
+    if (debug) std.debug.print("new_content:\n{s}\n---------\n", .{new_content.items});
 
     // Set line_start to the end of the import block to start copying the rest of the file
     // var line_start: usize = final_filtered_imports[final_filtered_imports.len - 1].end_index;
@@ -76,6 +78,12 @@ fn clean_content(al: std.mem.Allocator, imports: []zigimports.ImportSpan, source
 
         const line = source[line_start..actual_line_end];
 
+        // skip newlines already handled in imports lines
+        if (line_start <= last_import_line and std.mem.eql(u8, line, "\n")) {
+            line_start = actual_line_end;
+            continue;
+        }
+
         var is_import_line = false;
         for (imports) |imp| {
             if (line_start == imp.start_index) {
@@ -84,12 +92,8 @@ fn clean_content(al: std.mem.Allocator, imports: []zigimports.ImportSpan, source
             }
         }
 
-        if (line_start <= last_import_line and std.mem.eql(u8, line, "\n")) {
-            line_start = actual_line_end;
-            continue;
-        }
-
         if (!is_import_line) {
+            if (debug) std.debug.print("appending: {s}", .{line});
             try new_content.appendSlice(line);
         }
 
@@ -118,7 +122,7 @@ fn run(al: std.mem.Allocator, filepath: []const u8, fix_mode: bool, debug: bool)
         std.debug.print("Found {} unused imports in {s}\n", .{ unused_imports.items.len, filepath });
 
     if (fix_mode) {
-        const cleaned_content = try clean_content(al, imports, source, unused_imports.items);
+        const cleaned_content = try clean_content(al, imports, source, unused_imports.items, debug);
         defer al.free(cleaned_content);
 
         try write_file(filepath, cleaned_content);
