@@ -85,7 +85,6 @@ fn clean_content(al: std.mem.Allocator, imports: []zigimports.ImportSpan, source
         }
 
         if (line_start <= last_import_line and std.mem.eql(u8, line, "\n")) {
-            std.debug.print("skipping already handled newline: {s}\n", .{line});
             line_start = actual_line_end;
             continue;
         }
@@ -118,18 +117,22 @@ fn run(al: std.mem.Allocator, filepath: []const u8, fix_mode: bool, debug: bool)
     if (debug)
         std.debug.print("Found {} unused imports in {s}\n", .{ unused_imports.items.len, filepath });
 
-    if (unused_imports.items.len > 0 and fix_mode) {
+    if (fix_mode) {
         const cleaned_content = try clean_content(al, imports, source, unused_imports.items);
         defer al.free(cleaned_content);
 
         try write_file(filepath, cleaned_content);
 
-        std.debug.print("{s} - Removed {} unused import{s}\n", .{
-            filepath,
-            unused_imports.items.len,
-            if (unused_imports.items.len == 1) "" else "s",
-        });
-        return true;
+        if (unused_imports.items.len > 0) {
+            std.debug.print("{s} - Removed {} unused import{s}\n", .{
+                filepath,
+                unused_imports.items.len,
+                if (unused_imports.items.len == 1) "" else "s",
+            });
+            return true;
+        } else {
+            return false;
+        }
     } else {
         for (unused_imports.items) |import| {
             std.debug.print("{s}:{}:{}: {s} is unused\n", .{
