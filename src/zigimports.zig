@@ -1,4 +1,5 @@
 const std = @import("std");
+const print = std.debug.print;
 pub const ImportKind = enum(u8) {
     Builtin,
     ThirdParty,
@@ -334,17 +335,6 @@ pub fn remove_imports(al: std.mem.Allocator, source: [:0]const u8, imports: []Im
     return new_spans;
 }
 
-fn convertChunksToString(al: std.mem.Allocator, chunks: [][]const u8) ![]u8 {
-    var result = try std.ArrayList(u8).initCapacity(al, 1024);
-    defer result.deinit();
-
-    for (chunks) |chunk| {
-        try result.appendSlice(chunk);
-    }
-
-    return result.toOwnedSlice();
-}
-
 pub fn compareImports(_: void, lhs: ImportSpan, rhs: ImportSpan) bool {
     // Compare by kind
     if (@intFromEnum(lhs.kind) != @intFromEnum(rhs.kind)) {
@@ -382,89 +372,4 @@ pub fn compareImports(_: void, lhs: ImportSpan, rhs: ImportSpan) bool {
 
     // If everything else is equal, compare by original line number
     return lhs.start_line < rhs.start_line;
-}
-
-const print = std.debug.print;
-
-pub fn newSourceFromImports(allocator: std.mem.Allocator, source: [:0]const u8, imports: []ImportSpan) !std.ArrayList(u8) {
-    var new_content = std.ArrayList(u8).init(allocator);
-
-    // Add sorted imports to the top of the new content
-    var current_kind: ?ImportKind = null;
-    for (imports) |imp| {
-        if (current_kind != imp.kind) {
-            if (current_kind != null) {
-                // Ensure a newline between different import groups
-                try new_content.appendSlice(&[_]u8{'\n'});
-            }
-            current_kind = imp.kind;
-        }
-        try new_content.appendSlice(source[imp.start_index..imp.end_index]);
-    }
-
-    // Set line_start to the end of the import block to start copying the rest of the file
-    var line_start: usize = imports[imports.len - 1].end_index;
-
-    // Copy the rest of the file, excluding the original import lines
-    while (line_start < source.len) {
-        const line_end = std.mem.indexOfScalarPos(u8, source, line_start, '\n');
-        const actual_line_end = if (line_end == null) source.len else line_end.? + 1;
-
-        const line = source[line_start..actual_line_end];
-
-        var is_import_line = false;
-        for (imports) |imp| {
-            if (line_start == imp.start_index) {
-                is_import_line = true;
-                break;
-            }
-        }
-
-        print("line: {s}", .{});
-        if (!is_import_line) {
-            print("added \n", .{});
-            try new_content.appendSlice(line);
-        }
-
-        line_start = actual_line_end;
-    }
-
-    print("{s}\n", .{new_content.items});
-
-    return new_content;
-}
-
-test "base-delete" {
-    const allocator = std.testing.allocator;
-
-    const input =
-        \\const std = @import("std");
-        \\const unused = @import("unused");
-        \\pub fn main() void {
-        \\    std.debug.print("Hi", .{});
-        \\}
-        \\
-    ;
-
-    const expected_output =
-        \\const std = @import("std");
-        \\pub fn main() void {
-        \\    std.debug.print("Hi", .{});
-        \\}
-        \\
-    ;
-
-    const imports = try find_imports(allocator, input, false);
-    defer allocator.free(imports);
-
-    const unused_imports = try identifyUnusedImports(allocator, imports, input, false);
-    defer unused_imports.deinit();
-
-    const new_chunks = try remove_imports(allocator, input, unused_imports.items, false);
-    defer new_chunks.deinit();
-
-    const new_content = try convertChunksToString(allocator, new_chunks.items);
-    defer allocator.free(new_content);
-
-    try std.testing.expectEqualStrings(expected_output, new_content);
 }
