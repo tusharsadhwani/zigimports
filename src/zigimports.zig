@@ -1,4 +1,11 @@
 const std = @import("std");
+const print = std.debug.print;
+pub const ImportKind = enum(u8) {
+    Builtin,
+    ThirdParty,
+    Local,
+    Specific,
+};
 
 pub const ImportSpan = struct {
     import_name: []const u8,
@@ -8,6 +15,10 @@ pub const ImportSpan = struct {
     start_column: usize,
     end_line: usize,
     end_column: usize,
+    module_start: usize,
+    module: []const u8,
+    kind: ImportKind,
+    full_import: []const u8,
 };
 
 pub const BlockSpan = struct {
@@ -79,15 +90,11 @@ fn is_inside_block(blocks: []BlockSpan, source_pos: usize) bool {
     return false;
 }
 
-pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) !std.ArrayList(ImportSpan) {
+pub fn find_imports(al: std.mem.Allocator, source: [:0]const u8, debug: bool) ![]ImportSpan {
     var tree = try std.zig.Ast.parse(al, source, .zig);
     defer tree.deinit(al);
 
-    var import_index = std.StringHashMap(u32).init(al);
-    var import_used = std.StringHashMap(bool).init(al);
     var block_spans = std.ArrayList(BlockSpan).init(al);
-    defer import_index.deinit();
-    defer import_used.deinit();
     defer block_spans.deinit();
     // Pass 1: Find the spans of all block scopes
     for (tree.nodes.items(.tag), 0..) |node_type, index| {
@@ -130,6 +137,8 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) !
         }
     }
 
+    var imports = std.ArrayList(ImportSpan).init(al);
+    errdefer imports.deinit();
     // Pass 2: Find all global variable declarations
     for (tree.nodes.items(.tag), 0..) |node_type, index| {
         if (node_type != .simple_var_decl) continue;
@@ -157,13 +166,97 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) !
 
         const import_name_idx = import_stmt.ast.mut_token + 1;
         const import_name = tree.tokenSlice(import_name_idx);
-        try import_index.put(import_name, @intCast(index));
-        if (debug and import_used.get(import_name) == null)
-            std.debug.print("Found new global: {s}\n", .{import_name});
-        try import_used.put(import_name, false);
+
+        var token_idx = import_name_idx;
+        var module_start: usize = 0;
+        var module: []const u8 = "";
+        var kind: ImportKind = .ThirdParty;
+        var full_import_start: usize = 0;
+        var full_import_end: usize = 0;
+        var found_import = false;
+
+        while (token_idx < tree.tokens.len) {
+            const token = tree.tokenSlice(token_idx);
+            if (std.mem.eql(u8, token, "@import")) {
+                full_import_start = tree.tokenToSpan(token_idx).start;
+                const next_token_idx = token_idx + 2;
+                if (next_token_idx < tree.tokens.len) {
+                    module_start = tree.tokenToSpan(next_token_idx).start - full_import_start;
+                    module = tree.tokenSlice(next_token_idx);
+                    // remove quotes
+                    module = module[1 .. module.len - 1];
+                    found_import = true;
+                }
+            } else if (std.mem.eql(u8, token, ";") or std.mem.eql(u8, token, ".")) {
+                full_import_end = tree.tokenToSpan(token_idx + 1).end;
+                break;
+            }
+            token_idx += 1;
+        }
+
+        if (!found_import) continue;
+
+        // Determine kind
+        const is_builtin = std.mem.eql(u8, module, "std") or
+            std.mem.eql(u8, module, "root") or
+            std.mem.eql(u8, module, "builtin");
+
+        const is_local = std.mem.endsWith(u8, module, ".zig");
+
+        const is_specific = std.mem.containsAtLeast(u8, module, 1, ".") and !is_local;
+
+        kind = if (is_builtin) ImportKind.Builtin else if (is_local) ImportKind.Local else if (is_specific) ImportKind.Specific else ImportKind.ThirdParty;
+
+        const first_token_idx = tree.firstToken(@intCast(index));
+        const start_location = tree.tokenLocation(0, first_token_idx);
+        const last_token = tree.lastToken(@intCast(index));
+
+        const semicolon = last_token + 1;
+        var end_location = tree.tokenLocation(0, semicolon);
+        // If the semicolon is followed by newlines, include those too
+        const start_index: usize = tree.tokenToSpan(first_token_idx).start;
+        var end_index = tree.tokenToSpan(semicolon).end;
+        if (source.len > end_index and source[end_index] == '\n') {
+            end_index += 1;
+            end_location.line += 1;
+            end_location.column = 0;
+        }
+
+        const span = ImportSpan{
+            .import_name = import_name,
+            .start_index = start_index,
+            .end_index = end_index,
+            .start_line = start_location.line + 1,
+            .start_column = start_location.column,
+            .end_line = end_location.line + 1,
+            .end_column = end_location.column + tree.tokenSlice(semicolon).len,
+            .module_start = module_start,
+            .module = module,
+            .kind = kind,
+            .full_import = source[full_import_start .. end_index - 2],
+        };
+        try imports.append(span);
     }
 
-    // Pass 3: Check if we use the variable anywhere in the file
+    return imports.toOwnedSlice();
+}
+
+pub fn identifyUnusedImports(al: std.mem.Allocator, imports: []ImportSpan, source: [:0]const u8, debug: bool) !std.ArrayList(ImportSpan) {
+    var tree = try std.zig.Ast.parse(al, source, .zig);
+    defer tree.deinit(al);
+
+    var import_index = std.StringHashMap(usize).init(al);
+    var import_used = std.StringHashMap(bool).init(al);
+    defer import_index.deinit();
+    defer import_used.deinit();
+
+    // Store all imports in the hashmap
+    for (imports, 0..) |import_span, index| {
+        try import_index.put(import_span.import_name, index);
+        try import_used.put(import_span.import_name, false);
+    }
+
+    // Check if we use the variable anywhere in the file
     for (tree.nodes.items(.tag), 0..) |node_type, index| {
         if (node_type != .field_access and node_type != .identifier) continue;
         const identifier_idx = tree.firstToken(@intCast(index));
@@ -185,49 +278,12 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) !
         if (!is_used) {
             if (debug) std.debug.print("Found unused identifier: {s}\n", .{import_variable});
             const node_index = import_index.get(import_variable).?;
-
-            const first_token = tree.firstToken(node_index);
-            const start_location = tree.tokenLocation(0, first_token);
-            const last_token = tree.lastToken(node_index);
-
-            const semicolon = last_token + 1;
-            var end_location = tree.tokenLocation(0, semicolon);
-            // If the semicolon is followed by a newlines, delete those too
-            const start_index = tree.tokenToSpan(first_token).start;
-            var end_index = tree.tokenToSpan(semicolon).end;
-            if (source.len > end_index and source[end_index] == '\n') {
-                end_index += 1;
-                end_location.line += 1;
-                end_location.column = 0;
-
-                // If the statement has at least two leading and at least two trailing
-                // newlines, then remove two trailing newlines.
-                // For well-formatted zig code, this will ensure that if the import was
-                // on its own little section surrounded by empty lines, the whole
-                // section is deleted.
-                if (start_index > 1 and source[start_index - 1] == '\n' and source[start_index - 2] == '\n' and source.len > end_index and source[end_index] == '\n') {
-                    end_index += 1;
-                    end_location.line += 1;
-                    end_location.column = 0;
-                }
-            }
-
-            const span = ImportSpan{
-                .import_name = import_variable,
-                .start_index = start_index,
-                .end_index = end_index,
-                .start_line = start_location.line + 1,
-                .start_column = start_location.column,
-                .end_line = end_location.line + 1,
-                .end_column = end_location.column + tree.tokenSlice(semicolon).len,
-            };
-            try unused_imports.append(span);
+            try unused_imports.append(imports[node_index]);
         }
     }
 
     return unused_imports;
 }
-
 /// Returns `true` when lhs shows up before rhs in the file, i.e. the start index of
 /// lhs < start index of rhs. Also has checks to ensure the spans never overlap.
 fn compare_start(_: void, lhs: ImportSpan, rhs: ImportSpan) bool {
@@ -240,11 +296,11 @@ fn compare_start(_: void, lhs: ImportSpan, rhs: ImportSpan) bool {
     return false;
 }
 
-pub fn remove_imports(al: std.mem.Allocator, source: [:0]u8, imports: []ImportSpan, debug: bool) !std.ArrayList([]u8) {
+pub fn remove_imports(al: std.mem.Allocator, source: [:0]const u8, imports: []ImportSpan, debug: bool) !std.ArrayList([]const u8) {
     std.debug.assert(imports.len > 0);
     std.mem.sort(ImportSpan, imports, {}, compare_start);
 
-    var new_spans = std.ArrayList([]u8).init(al);
+    var new_spans = std.ArrayList([]const u8).init(al);
     errdefer new_spans.deinit();
     var previous_import = imports[0];
     if (debug) {
@@ -277,4 +333,43 @@ pub fn remove_imports(al: std.mem.Allocator, source: [:0]u8, imports: []ImportSp
     try new_spans.append(source[previous_import.end_index..]);
     if (debug) std.debug.print("Keeping source from {} to the end.\n", .{previous_import.end_index});
     return new_spans;
+}
+
+pub fn compareImports(_: void, lhs: ImportSpan, rhs: ImportSpan) bool {
+    // Compare by kind
+    if (@intFromEnum(lhs.kind) != @intFromEnum(rhs.kind)) {
+        return @intFromEnum(lhs.kind) < @intFromEnum(rhs.kind);
+    }
+
+    // Compare by module name
+    const order = std.mem.order(u8, lhs.module, rhs.module);
+    if (order == .lt) {
+        return true;
+    } else if (order == .gt) {
+        return false;
+    }
+
+    // If modules are equal, compare by extra paths
+    const lhs_extra = lhs.full_import[lhs.module_start + lhs.module.len .. lhs.full_import.len];
+    const rhs_extra = rhs.full_import[rhs.module_start + rhs.module.len .. rhs.full_import.len];
+    const extra_order = std.mem.order(u8, lhs_extra, rhs_extra);
+    if (extra_order == .lt) {
+        return true;
+    } else if (extra_order == .gt) {
+        return false;
+    }
+
+    // If equal, compare by the number of "." to sort by scope
+    const lhs_scope = std.mem.count(u8, lhs.module, ".");
+    const rhs_scope = std.mem.count(u8, rhs.module, ".");
+    if (lhs_scope != rhs_scope) {
+        return lhs_scope < rhs_scope;
+    }
+    // If the number of "." is the same, compare by length to sort by specificity
+    if (lhs.module.len != rhs.module.len) {
+        return lhs.module.len < rhs.module.len;
+    }
+
+    // If everything else is equal, compare by original line number
+    return lhs.start_line < rhs.start_line;
 }
