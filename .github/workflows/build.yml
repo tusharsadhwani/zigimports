@@ -50,7 +50,7 @@ jobs:
       - name: "Artifact upload: binary"
         uses: actions/upload-artifact@master
         with:
-          name: ${{ matrix.target }}
+          name: zigimports-${{ matrix.target }}
           path: ./zig-out/bin/zigimports-${{ matrix.target }}*
 
       - name: Publish packages
