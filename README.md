@@ -16,6 +16,13 @@ the Zig compiler will simply ignore it.
 
 ## Installation
 
+Get it from the Releases page:
+<https://github.com/tusharsadhwani/zigimports/releases>
+
+Or if you prefer,
+
+### Build it locally
+
 Requires Zig 0.13.0 or newer:
 
 ```bash
