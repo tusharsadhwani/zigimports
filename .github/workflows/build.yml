@@ -1,8 +1,33 @@
 name: CI
-on: push
+
+on:
+  push:
+    tags:
+      - "v*"
+    branches:
+      - main
+  workflow_dispatch:
+  pull_request:
+
+permissions:
+  contents: write
+
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-linux
+          - x86_64-macos
+          - x86_64-windows
+          - aarch64-linux
+          - aarch64-macos
+          - aarch64-windows
+          - riscv64-linux
+          - powerpc64le-linux
+          - mips64-linux
     steps:
       - uses: actions/checkout@v4
         with:
@@ -13,5 +38,27 @@ jobs:
         with:
           version: 0.13.0
 
-      - name: Build
-        run: zig build
+      - name: Check for release
+        id: is-release
+        shell: bash
+        run: |
+          unset IS_RELEASE ; if [[ $GITHUB_REF =~ ^refs/tags/v[0-9].* ]]; then IS_RELEASE='true' ; fi
+          echo "IS_RELEASE=${IS_RELEASE}" >> $GITHUB_OUTPUT
+
+      - run: zig build -Doptimize=ReleaseSmall -Dtarget=${{ matrix.target }}
+
+      - name: "Artifact upload: binary"
+        uses: actions/upload-artifact@master
+        with:
+          name: ${{ matrix.target }}
+          path: ./zig-out/bin/zigimports-${{ matrix.target }}*
+
+      - name: Publish packages
+        uses: softprops/action-gh-release@v1
+        if: steps.is-release.outputs.IS_RELEASE
+        with:
+          draft: true
+          files: |
+            ./zig-out/bin/zigimports-${{ matrix.target }}*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
