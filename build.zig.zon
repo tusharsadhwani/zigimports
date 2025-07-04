@@ -1,6 +1,7 @@
 .{
-    .name = "zigimports",
-    .version = "0.0.1",
+    .name = .zigimports,
+    .version = "0.1.0",
+    .fingerprint = 0xcdf6d118ee8be4f0,
     .minimum_zig_version = "0.13.0",
     .dependencies = .{},
     .paths = .{
