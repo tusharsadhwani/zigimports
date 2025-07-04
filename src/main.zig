@@ -80,7 +80,10 @@ pub fn main() !u8 {
     var fix_mode = false;
     var debug = false;
     for (args[1..]) |arg| {
-        if (std.mem.eql(u8, arg, "--fix"))
+        if (std.mem.eql(u8, arg, "--version")) {
+            std.debug.print("0.1.1\n", .{});
+            return 0;
+        } else if (std.mem.eql(u8, arg, "--fix"))
             fix_mode = true
         else if (std.mem.eql(u8, arg, "--debug"))
             debug = true
