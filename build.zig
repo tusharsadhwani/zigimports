@@ -1,4 +1,5 @@
 const std = @import("std");
+const build_config: struct { name: @Type(.enum_literal), version: []const u8, fingerprint: u64, minimum_zig_version: []const u8, dependencies: struct {}, paths: []const []const u8 } = @import("build.zig.zon");
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
@@ -23,6 +24,10 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
     b.installArtifact(exe);
+
+    const options = b.addOptions();
+    options.addOption([]const u8, "version", build_config.version);
+    exe.root_module.addOptions("config", options);
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
