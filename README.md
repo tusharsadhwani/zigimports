@@ -10,7 +10,7 @@ the Zig compiler will simply ignore it.
 
 `zigimports` helps you avoid that by cleaning up unused imports.
 
-> [!NOTE] 
+> [!NOTE]
 > Zig plans to eventually address this issue in the compiler directly:
 > https://github.com/ziglang/zig/issues/335
 
@@ -50,3 +50,56 @@ To tidy up your entire codebase, use:
 ```bash
 zigimports --fix .
 ```
+
+Inspired by `go fmt`, imports are sorted as follows:
+- Standard library libraries
+- Third-party modules
+- Local imports
+
+A newline is placed in between each group.
+
+```zig
+# Before
+const zig = @import("std").zig;
+const root = @import("root");
+const foo = @import("foo");
+const Two = @import("baz.zig").Two;
+const debug = @import("std").debug;
+const print = @import("std").debug.print;
+const bar = @import("bar");
+const One = @import("baz.zig").One;
+const builtin = @import("builtin");
+const std = @import("std");
+
+pub fn hi() void {
+  print("hi");
+  One.add;
+  foo.bar();
+}
+
+pub fn bye() void {
+  print("bye");
+  builtin.is_test;
+}
+----------------------------------------
+# After
+const builtin = @import("builtin");
+const print = @import("std").debug.print;
+
+const foo = @import("foo");
+
+const One = @import("baz.zig").One;
+
+pub fn hi() void {
+  print("hi");
+  One.add;
+  foo.bar();
+}
+
+pub fn bye() void {
+  print("bye");
+  builtin.is_test;
+}
+```
+## Development
+There is an optional [Dev Container](https://containers.dev/) configuration and Dockerfile to help setup Zig.
