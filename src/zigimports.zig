@@ -18,8 +18,8 @@ pub const BlockSpan = struct {
 /// Resolve file and directory paths recursively, and return a list of Zig files
 /// present in the given paths.
 pub fn get_zig_files(al: std.mem.Allocator, path: []u8, debug: bool) !std.ArrayList([]u8) {
-    var files = std.ArrayList([]u8).init(al);
-    errdefer files.deinit();
+    var files: std.ArrayList([]u8) = .empty;
+    errdefer files.deinit(al);
     try _get_zig_files(al, &files, path, debug);
     return files;
 }
@@ -38,7 +38,7 @@ fn _get_zig_files(al: std.mem.Allocator, files: *std.ArrayList([]u8), path: []u8
         .file => {
             if (std.mem.eql(u8, std.fs.path.extension(path), ".zig")) {
                 if (debug) std.debug.print("Storing zig file {s}\n", .{path});
-                try files.append(try al.dupe(u8, path));
+                try files.append(al, try al.dupe(u8, path));
             }
         },
         .directory => {
@@ -83,12 +83,12 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) !
     var tree = try std.zig.Ast.parse(al, source, .zig);
     defer tree.deinit(al);
 
-    var import_index = std.StringHashMap(u32).init(al);
-    var import_used = std.StringHashMap(bool).init(al);
-    var block_spans = std.ArrayList(BlockSpan).init(al);
-    defer import_index.deinit();
-    defer import_used.deinit();
-    defer block_spans.deinit();
+    var import_index: std.StringHashMapUnmanaged(std.zig.Ast.Node.Index) = .empty;
+    var import_used: std.StringHashMapUnmanaged(bool) = .empty;
+    var block_spans: std.ArrayListUnmanaged(BlockSpan) = .empty;
+    defer import_index.deinit(al);
+    defer import_used.deinit(al);
+    defer block_spans.deinit(al);
     // Pass 1: Find the spans of all block scopes
     for (tree.nodes.items(.tag), 0..) |node_type, index| {
         switch (node_type) {
@@ -103,13 +103,15 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) !
             .container_decl_arg,
             .container_decl_arg_trailing,
             .tagged_union,
+            .tagged_union_enum_tag,
+            .tagged_union_enum_tag_trailing,
             .tagged_union_trailing,
             .tagged_union_two,
             .tagged_union_two_trailing,
             => {
-                const lbrace = tree.firstToken(@intCast(index));
-                const rbrace = tree.lastToken(@intCast(index));
-                try block_spans.append(.{
+                const lbrace = tree.firstToken(@enumFromInt(index));
+                const rbrace = tree.lastToken(@enumFromInt(index));
+                try block_spans.append(al, .{
                     .start_index = tree.tokenToSpan(lbrace).start,
                     .end_index = tree.tokenToSpan(rbrace).end,
                 });
@@ -133,7 +135,7 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) !
     // Pass 2: Find all global variable declarations
     for (tree.nodes.items(.tag), 0..) |node_type, index| {
         if (node_type != .simple_var_decl) continue;
-        const import_stmt = tree.simpleVarDecl(@intCast(index));
+        const import_stmt = tree.simpleVarDecl(@enumFromInt(index));
         // Skip non-global declarations
         const first_token = tree.tokens.get(import_stmt.firstToken());
         if (is_inside_block(block_spans.items, first_token.start)) {
@@ -157,27 +159,27 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) !
 
         const import_name_idx = import_stmt.ast.mut_token + 1;
         const import_name = tree.tokenSlice(import_name_idx);
-        try import_index.put(import_name, @intCast(index));
+        try import_index.put(al, import_name, @enumFromInt(index));
         if (debug and import_used.get(import_name) == null)
             std.debug.print("Found new global: {s}\n", .{import_name});
-        try import_used.put(import_name, false);
+        try import_used.put(al, import_name, false);
     }
 
     // Pass 3: Check if we use the variable anywhere in the file
     for (tree.nodes.items(.tag), 0..) |node_type, index| {
         if (node_type != .field_access and node_type != .identifier) continue;
-        const identifier_idx = tree.firstToken(@intCast(index));
+        const identifier_idx = tree.firstToken(@enumFromInt(index));
         const identifier = tree.tokenSlice(identifier_idx);
         if (import_used.getKey(identifier) != null) {
             // Mark import as used
             if (debug and import_used.get(identifier) == false)
                 std.debug.print("Global {s} is being used\n", .{identifier});
-            try import_used.put(identifier, true);
+            try import_used.put(al, identifier, true);
         }
     }
 
-    var unused_imports = std.ArrayList(ImportSpan).init(al);
-    errdefer unused_imports.deinit();
+    var unused_imports: std.ArrayList(ImportSpan) = .empty;
+    errdefer unused_imports.deinit(al);
     var name_iterator = import_used.iterator();
     while (name_iterator.next()) |entry| {
         const import_variable = entry.key_ptr.*;
@@ -212,7 +214,7 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) !
                 }
             }
 
-            const span = ImportSpan{
+            const span: ImportSpan = .{
                 .import_name = import_variable,
                 .start_index = start_index,
                 .end_index = end_index,
@@ -221,7 +223,7 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) !
                 .end_line = end_location.line + 1,
                 .end_column = end_location.column + tree.tokenSlice(semicolon).len,
             };
-            try unused_imports.append(span);
+            try unused_imports.append(al, span);
         }
     }
 
@@ -244,8 +246,8 @@ pub fn remove_imports(al: std.mem.Allocator, source: [:0]u8, imports: []ImportSp
     std.debug.assert(imports.len > 0);
     std.mem.sort(ImportSpan, imports, {}, compare_start);
 
-    var new_spans = std.ArrayList([]u8).init(al);
-    errdefer new_spans.deinit();
+    var new_spans: std.ArrayList([]u8) = .empty;
+    errdefer new_spans.deinit(al);
     var previous_import = imports[0];
     if (debug) {
         std.debug.print("Unused import statement from {}:{} ({}) to {}:{} ({})\n", .{
@@ -258,9 +260,9 @@ pub fn remove_imports(al: std.mem.Allocator, source: [:0]u8, imports: []ImportSp
         });
         std.debug.print("Keeping source from 0 to {}\n", .{previous_import.start_index});
     }
-    try new_spans.append(source[0..previous_import.start_index]);
+    try new_spans.append(al, source[0..previous_import.start_index]);
     for (imports[1..]) |import| {
-        try new_spans.append(source[previous_import.end_index..import.start_index]);
+        try new_spans.append(al, source[previous_import.end_index..import.start_index]);
         if (debug) {
             std.debug.print("Unused import statement from {}:{} ({}) to {}:{} ({})\n", .{
                 import.start_line,
@@ -274,7 +276,7 @@ pub fn remove_imports(al: std.mem.Allocator, source: [:0]u8, imports: []ImportSp
         }
         previous_import = import;
     }
-    try new_spans.append(source[previous_import.end_index..]);
+    try new_spans.append(al, source[previous_import.end_index..]);
     if (debug) std.debug.print("Keeping source from {} to the end.\n", .{previous_import.end_index});
     return new_spans;
 }

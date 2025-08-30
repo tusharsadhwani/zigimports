@@ -10,7 +10,7 @@ fn read_file(al: std.mem.Allocator, filepath: []const u8) ![:0]u8 {
         al,
         std.math.maxInt(usize),
         null,
-        @alignOf(u8),
+        .of(u8),
         0, // NULL terminated, needed for the zig parser
     );
     return source;
@@ -34,16 +34,16 @@ fn run(al: std.mem.Allocator, filepath: []const u8, fix_mode: bool, debug: bool)
     const source = try read_file(al, filepath);
     defer al.free(source);
 
-    const unused_imports = try zigimports.find_unused_imports(al, source, debug);
-    defer unused_imports.deinit();
+    var unused_imports = try zigimports.find_unused_imports(al, source, debug);
+    defer unused_imports.deinit(al);
     if (debug)
         std.debug.print("Found {} unused imports in {s}\n", .{ unused_imports.items.len, filepath });
 
     if (fix_mode) {
         const fix_count = unused_imports.items.len;
         if (fix_count > 0) {
-            const cleaned_sources = try zigimports.remove_imports(al, source, unused_imports.items, debug);
-            defer cleaned_sources.deinit();
+            var cleaned_sources = try zigimports.remove_imports(al, source, unused_imports.items, debug);
+            defer cleaned_sources.deinit(al);
             try write_file(filepath, cleaned_sources.items);
 
             std.debug.print("{s} - Removed {} unused import{s}\n", .{
@@ -75,8 +75,8 @@ pub fn main() !u8 {
     var args = try std.process.argsAlloc(al);
     defer std.process.argsFree(al, args);
 
-    var paths = std.ArrayList([]u8).init(al);
-    defer paths.deinit();
+    var paths: std.ArrayList([]u8) = .empty;
+    defer paths.deinit(al);
 
     var fix_mode = false;
     var debug = false;
@@ -89,7 +89,7 @@ pub fn main() !u8 {
         else if (std.mem.eql(u8, arg, "--debug"))
             debug = true
         else
-            try paths.append(arg);
+            try paths.append(al, arg);
     }
 
     if (paths.items.len == 0) {
@@ -99,8 +99,8 @@ pub fn main() !u8 {
 
     var failed = false;
     for (paths.items) |path| {
-        const files = try zigimports.get_zig_files(al, path, debug);
-        defer files.deinit();
+        var files = try zigimports.get_zig_files(al, path, debug);
+        defer files.deinit(al);
         defer for (files.items) |file| al.free(file);
 
         for (files.items) |filepath| {
