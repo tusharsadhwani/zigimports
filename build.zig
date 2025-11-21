@@ -31,7 +31,7 @@ pub fn build(b: *std.Build) !void {
 
     const options = b.addOptions();
     options.addOption([]const u8, "version", build_config.version);
-    exe.root_module.addOptions("config", options);
+    exe.root_module.addOptions("build_config", options);
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
