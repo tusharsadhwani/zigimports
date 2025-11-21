@@ -44,24 +44,14 @@ fn _get_zig_files(al: std.mem.Allocator, files: *std.ArrayList([]u8), path: []u8
         },
         .directory => {
             // openDir fails on symlinks when .no_follow is given, skip those
-            var dir: std.fs.Dir = undefined;
-            if (@hasField(std.fs.Dir.OpenOptions, "no_follow")) {
-                dir = std.fs.cwd().openDir(
-                    path,
-                    .{ .iterate = true, .no_follow = true },
-                ) catch |err| {
-                    if (debug) std.debug.print("Failed to open {s}: {s}\n", .{ path, @errorName(err) });
-                    return;
-                };
-            } else {
-                dir = std.fs.cwd().openDir(
-                    path,
-                    .{ .iterate = true, .follow_symlinks = false },
-                ) catch |err| {
-                    if (debug) std.debug.print("Failed to open {s}: {s}\n", .{ path, @errorName(err) });
-                    return;
-                };
-            }
+            const openOptions: std.fs.Dir.OpenOptions = if (@hasField(std.fs.Dir.OpenOptions, "no_follow"))
+                .{ .iterate = true, .no_follow = true }
+            else
+                .{ .iterate = true, .follow_symlinks = false };
+            var dir = std.fs.cwd().openDir(path, openOptions) catch |err| {
+                if (debug) std.debug.print("Failed to open {s}: {s}\n", .{ path, @errorName(err) });
+                return;
+            };
             defer dir.close();
 
             var entries = dir.iterate();
