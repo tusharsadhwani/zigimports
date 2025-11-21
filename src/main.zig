@@ -7,8 +7,8 @@ fn read_file(al: std.mem.Allocator, filepath: []const u8) ![:0]u8 {
     const file = try std.fs.cwd().openFile(filepath, .{});
     defer file.close();
 
-    const fstat = try file.stat();
-    const buffer = try al.allocSentinel(u8, fstat.size, 0);
+    const stat = try file.stat();
+    const buffer = try al.allocSentinel(u8, stat.size, 0);
 
     _ = try file.read(buffer);
     return buffer;
