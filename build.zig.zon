@@ -2,7 +2,7 @@
     .name = .zigimports,
     .version = "0.1.1",
     .fingerprint = 0xcdf6d118ee8be4f0,
-    .minimum_zig_version = "0.14.0",
+    .minimum_zig_version = "0.15.1",
     .dependencies = .{},
     .paths = .{
         "build.zig",
