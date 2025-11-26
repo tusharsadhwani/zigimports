@@ -8,6 +8,12 @@ pub const ImportSpan = struct {
     start_column: usize,
     end_line: usize,
     end_column: usize,
+
+    // Compare ImportSpans by their source location.
+    fn lessThanByLocation(_: void, a: ImportSpan, b: ImportSpan) bool {
+        if (a.start_line == b.start_line) return a.start_column < b.start_column;
+        return a.start_line < b.start_line;
+    }
 };
 
 pub const BlockSpan = struct {
@@ -226,6 +232,9 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) !
             try unused_imports.append(al, span);
         }
     }
+
+    // Order results by their source location.
+    std.sort.heap(ImportSpan, unused_imports.items, {}, ImportSpan.lessThanByLocation);
 
     return unused_imports;
 }
