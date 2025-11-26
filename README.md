@@ -23,7 +23,7 @@ Or if you prefer,
 
 ### Build it locally
 
-Requires Zig 0.14.0 or newer:
+Requires Zig 0.15.1 or newer:
 
 ```bash
 zig build --release=safe
