@@ -1,19 +1,18 @@
 const std = @import("std");
-const config = @import("config");
+const build_config = @import("build_config");
 
 const zigimports = @import("zigimports.zig");
 
 fn read_file(al: std.mem.Allocator, filepath: []const u8) ![:0]u8 {
     const file = try std.fs.cwd().openFile(filepath, .{});
     defer file.close();
-    const source = try file.readToEndAllocOptions(
-        al,
-        std.math.maxInt(usize),
-        null,
-        .of(u8),
-        0, // NULL terminated, needed for the zig parser
-    );
-    return source;
+
+    const stat = try file.stat();
+    const buffer = try al.allocSentinel(u8, stat.size, 0);
+    errdefer al.free(buffer);
+
+    _ = try file.read(buffer);
+    return buffer;
 }
 
 fn write_file(filepath: []const u8, chunks: [][]u8) !void {
@@ -82,7 +81,7 @@ pub fn main() !u8 {
     var debug = false;
     for (args[1..]) |arg| {
         if (std.mem.eql(u8, arg, "--version")) {
-            std.debug.print("{s}\n", .{config.version});
+            std.debug.print("{s}\n", .{build_config.version});
             return 0;
         } else if (std.mem.eql(u8, arg, "--fix"))
             fix_mode = true
