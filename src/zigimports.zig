@@ -17,22 +17,22 @@ pub const BlockSpan = struct {
 
 /// Resolve file and directory paths recursively, and return a list of Zig files
 /// present in the given paths.
-pub fn get_zig_files(al: std.mem.Allocator, path: []u8, debug: bool) !std.ArrayList([]u8) {
+pub fn get_zig_files(gpa: std.mem.Allocator, io: std.Io, path: []const u8, debug: bool) !std.ArrayList([]u8) {
     var files: std.ArrayList([]u8) = .empty;
-    errdefer files.deinit(al);
-    try _get_zig_files(al, &files, path, debug);
+    errdefer files.deinit(gpa);
+    try _get_zig_files(gpa, io, &files, path, debug);
     return files;
 }
-fn _get_zig_files(al: std.mem.Allocator, files: *std.ArrayList([]u8), path: []u8, debug: bool) !void {
+fn _get_zig_files(al: std.mem.Allocator, io: std.Io, files: *std.ArrayList([]u8), path: []const u8, debug: bool) !void {
     // openFile fails on symlinks that point to paths that don't exist, skip those
-    const file = std.fs.cwd().openFile(path, .{}) catch |err| {
-        if (err == std.fs.File.OpenError.ProcessFdQuotaExceeded) return err;
+    const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch |err| {
+        if (err == std.Io.File.OpenError.ProcessFdQuotaExceeded) return err;
         if (debug) std.debug.print("Failed to open {s}: {s}\n", .{ path, @errorName(err) });
         return;
     };
-    defer file.close();
+    defer file.close(io);
 
-    const stat = try file.stat();
+    const stat = try file.stat(io);
     if (debug) std.debug.print("Path {s} is a {s}\n", .{ path, @tagName(stat.kind) });
     switch (stat.kind) {
         .file => {
@@ -42,18 +42,15 @@ fn _get_zig_files(al: std.mem.Allocator, files: *std.ArrayList([]u8), path: []u8
             }
         },
         .directory => {
-            // openDir fails on symlinks when .no_follow is given, skip those
-            var dir = std.fs.cwd().openDir(
-                path,
-                .{ .iterate = true, .no_follow = true },
-            ) catch |err| {
+            // openDir fails on symlinks when follow_symlinks is false, skip those
+            var dir = std.Io.Dir.cwd().openDir(io, path, .{ .iterate = true, .follow_symlinks = false }) catch |err| {
                 if (debug) std.debug.print("Failed to open {s}: {s}\n", .{ path, @errorName(err) });
                 return;
             };
-            defer dir.close();
+            defer dir.close(io);
 
             var entries = dir.iterate();
-            while (try entries.next()) |entry| {
+            while (try entries.next(io)) |entry| {
                 // Ignore dotted files / folders
                 if (entry.name[0] == '.') {
                     if (debug) std.debug.print("Skipping hidden path {s}\n", .{entry.name});
@@ -61,7 +58,7 @@ fn _get_zig_files(al: std.mem.Allocator, files: *std.ArrayList([]u8), path: []u8
                 }
                 const child_path = try std.fs.path.join(al, &.{ path, entry.name });
                 defer al.free(child_path);
-                try _get_zig_files(al, files, child_path, debug);
+                try _get_zig_files(al, io, files, child_path, debug);
             }
         },
         else => {},
