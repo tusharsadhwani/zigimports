@@ -144,6 +144,20 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) !
             continue;
         }
 
+        // Don't delete declarations that have doc comments attached; they may
+        // exist just to hold the doc comment (e.g. `const x = @This();`), and
+        // deleting them would leave behind an unattached doc comment, which is
+        // invalid Zig syntax.
+        const first_token_idx = import_stmt.firstToken();
+        if (first_token_idx > 0 and tree.tokens.items(.tag)[first_token_idx - 1] == .doc_comment) {
+            if (debug) {
+                std.debug.print("Skipping global on line {} as it has a doc comment\n", .{
+                    tree.tokenLocation(0, first_token_idx).line,
+                });
+            }
+            continue;
+        }
+
         // Don't try to delete `pub`, `extern` and `export` statements
         if (import_stmt.visib_token != null or import_stmt.extern_export_token != null) {
             if (debug) {
@@ -225,6 +239,25 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) !
     }
 
     return unused_imports;
+}
+
+test "unused global is reported" {
+    const al = std.testing.allocator;
+    const source = try al.dupeZ(u8, "const x = @This();\n");
+    defer al.free(source);
+    var unused = try find_unused_imports(al, source, false);
+    defer unused.deinit(al);
+    try std.testing.expectEqual(1, unused.items.len);
+    try std.testing.expectEqualStrings("x", unused.items[0].import_name);
+}
+
+test "global with doc comment is preserved" {
+    const al = std.testing.allocator;
+    const source = try al.dupeZ(u8, "/// My doc comment\nconst x = @This();\n");
+    defer al.free(source);
+    var unused = try find_unused_imports(al, source, false);
+    defer unused.deinit(al);
+    try std.testing.expectEqual(0, unused.items.len);
 }
 
 /// Returns `true` when lhs shows up before rhs in the file, i.e. the start index of
