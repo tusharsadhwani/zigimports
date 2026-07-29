@@ -77,7 +77,7 @@ fn is_inside_block(blocks: []BlockSpan, source_pos: usize) bool {
 }
 
 pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) !std.ArrayList(ImportSpan) {
-    var tree = try std.zig.Ast.parse(al, source, .zig);
+    var tree = try std.zig.Ast.parse(al, source, .{});
     defer tree.deinit(al);
 
     var import_index: std.StringHashMapUnmanaged(std.zig.Ast.Node.Index) = .empty;
