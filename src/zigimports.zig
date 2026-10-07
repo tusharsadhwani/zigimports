@@ -77,7 +77,7 @@ fn is_inside_block(blocks: []BlockSpan, source_pos: usize) bool {
 }
 
 pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) !std.ArrayList(ImportSpan) {
-    var tree = try std.zig.Ast.parse(al, source, .zig);
+    var tree = try std.zig.Ast.parse(al, source, .{ .mode = .zig });
     defer tree.deinit(al);
 
     var import_index: std.StringHashMapUnmanaged(std.zig.Ast.Node.Index) = .empty;
@@ -106,8 +106,8 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) !
             .tagged_union_two,
             .tagged_union_two_trailing,
             => {
-                const lbrace = tree.firstToken(@enumFromInt(index));
-                const rbrace = tree.lastToken(@enumFromInt(index));
+                const lbrace = tree.firstToken(@fromBackingInt(@intCast(index)));
+                const rbrace = tree.lastToken(@fromBackingInt(@intCast(index)));
                 try block_spans.append(al, .{
                     .start_index = tree.tokenToSpan(lbrace).start,
                     .end_index = tree.tokenToSpan(rbrace).end,
@@ -132,7 +132,7 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) !
     // Pass 2: Find all global variable declarations
     for (tree.nodes.items(.tag), 0..) |node_type, index| {
         if (node_type != .simple_var_decl) continue;
-        const import_stmt = tree.simpleVarDecl(@enumFromInt(index));
+        const import_stmt = tree.simpleVarDecl(@fromBackingInt(@intCast(index)));
         // Skip non-global declarations
         const first_token = tree.tokens.get(import_stmt.firstToken());
         if (is_inside_block(block_spans.items, first_token.start)) {
@@ -170,7 +170,7 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) !
 
         const import_name_idx = import_stmt.ast.mut_token + 1;
         const import_name = tree.tokenSlice(import_name_idx);
-        try import_index.put(al, import_name, @enumFromInt(index));
+        try import_index.put(al, import_name, @fromBackingInt(@intCast(index)));
         if (debug and import_used.get(import_name) == null)
             std.debug.print("Found new global: {s}\n", .{import_name});
         try import_used.put(al, import_name, false);
@@ -179,7 +179,7 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) !
     // Pass 3: Check if we use the variable anywhere in the file
     for (tree.nodes.items(.tag), 0..) |node_type, index| {
         if (node_type != .field_access and node_type != .identifier) continue;
-        const identifier_idx = tree.firstToken(@enumFromInt(index));
+        const identifier_idx = tree.firstToken(@fromBackingInt(@intCast(index)));
         const identifier = tree.tokenSlice(identifier_idx);
         if (import_used.getKey(identifier) != null) {
             // Mark import as used
@@ -243,7 +243,7 @@ pub fn find_unused_imports(al: std.mem.Allocator, source: [:0]u8, debug: bool) !
 
 test "unused global is reported" {
     const al = std.testing.allocator;
-    const source = try al.dupeZ(u8, "const x = @This();\n");
+    const source = try al.dupeSentinel(u8, "const x = @This();\n", 0);
     defer al.free(source);
     var unused = try find_unused_imports(al, source, false);
     defer unused.deinit(al);
@@ -253,7 +253,7 @@ test "unused global is reported" {
 
 test "global with doc comment is preserved" {
     const al = std.testing.allocator;
-    const source = try al.dupeZ(u8, "/// My doc comment\nconst x = @This();\n");
+    const source = try al.dupeSentinel(u8, "/// My doc comment\nconst x = @This();\n", 0);
     defer al.free(source);
     var unused = try find_unused_imports(al, source, false);
     defer unused.deinit(al);
